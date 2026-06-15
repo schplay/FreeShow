@@ -1,10 +1,12 @@
 import { get } from "svelte/store"
 import { uid } from "uid"
-import type { Show } from "../../types/Show"
+import type { Show, Slide } from "../../types/Show"
+import type { StageLayout } from "../../types/Stage"
 import type { Category } from "../../types/Tabs"
 import { history } from "../components/helpers/history"
+import { convertOldShowValues } from "../components/helpers/setShow"
 import { checkName } from "../components/helpers/show"
-import { activeDrawerTab, activePopup, activeProject, activeRename, activeShow, alertMessage, categories, drawerTabsData, shows } from "../stores"
+import { actionTags, activeDrawerTab, activePopup, activeProject, activeRename, activeShow, alertMessage, categories, drawerTabsData, shows } from "../stores"
 import { newToast } from "../utils/common"
 import { convertText } from "./txt"
 
@@ -32,7 +34,7 @@ export function createCategory(name: string, icon = "song", { isDefault, isArchi
     return id
 }
 
-export function setTempShows(tempShows: { id: string; show: Show }[]) {
+export function setTempShows(tempShows: { id: string; show: Show }[], options: { suppressFinishedToast?: boolean } = {}) {
     if (tempShows.length === 1) {
         const selectedIndex = get(activeShow)?.index === undefined ? undefined : get(activeShow)!.index! + 1
         history({ id: "UPDATE", newData: { data: tempShows[0].show, remember: { project: get(activeProject), index: selectedIndex } }, oldData: { id: tempShows[0].id }, location: { page: "show", id: "show" } })
@@ -41,20 +43,22 @@ export function setTempShows(tempShows: { id: string; show: Show }[]) {
     }
 
     activePopup.set(null)
-    newToast("main.finished")
+    if (!options.suppressFinishedToast) newToast("main.finished")
 }
 
-export function importShow(files: { content: string; name?: string; extension?: string }[]) {
+export async function importShow(files: { content: string; name?: string; extension?: string }[]) {
     const tempShows: { id: string; show: Show }[] = []
 
-    files.forEach(({ content, name }) => {
+    await Promise.all(files.map(async (a) => loadShow(a as any)))
+
+    async function loadShow({ content, name }) {
         let id
         let show
 
         try {
             const showData = JSON.parse(content)
             if (Array.isArray(showData)) {
-                [id, show] = showData
+                ;[id, show] = showData
             } else {
                 id = uid()
                 show = showData
@@ -66,7 +70,7 @@ export function importShow(files: { content: string; name?: string; extension?: 
             try {
                 const showData = JSON.parse(content)
                 if (Array.isArray(showData)) {
-                    [id, show] = showData
+                    ;[id, show] = showData
                 } else {
                     id = uid()
                     show = showData
@@ -87,8 +91,9 @@ export function importShow(files: { content: string; name?: string; extension?: 
         if (categoryId === "all" || categoryId === "unlabeled") categoryId = null
         show.category = categoryId
 
+        show = await convertOldShowValues(show)
         tempShows.push({ id, show: { ...show, name: checkName(show.name, id) } })
-    })
+    }
 
     setTempShows(tempShows)
 }
@@ -109,8 +114,88 @@ export function importTemplate(files: { content: string; name?: string; extensio
         history({ id: "UPDATE", newData: { data: template }, oldData: { id: templateId }, location: { page: "drawer", id: "template" } })
     })
 
-    alertMessage.set("actions.imported")
-    activePopup.set("alert")
+    if (get(activePopup)) {
+        alertMessage.set("actions.imported")
+        activePopup.set("alert")
+    } else {
+        newToast("actions.imported")
+    }
+}
+
+export function importAction(files: { content: string; name?: string; extension?: string }[]) {
+    files.forEach(({ content }) => {
+        const parsed = JSON.parse(content)
+        const action = parsed.action ? parsed.action : parsed
+        if (!action.triggers) return
+
+        // create any tags that do not exist
+        action.tags?.forEach((tagId: string) => {
+            if (get(actionTags)[tagId]) return
+
+            actionTags.update((a) => {
+                a[tagId] = { name: "Tag", color: "#ffffff" }
+                return a
+            })
+        })
+
+        const actionId = action.id || uid()
+        delete action.id
+
+        history({ id: "UPDATE", newData: { data: action }, oldData: { id: actionId }, location: { page: "drawer", id: "action" } })
+    })
+
+    if (get(activePopup)) {
+        alertMessage.set("actions.imported")
+        activePopup.set("alert")
+    } else {
+        newToast("actions.imported")
+    }
+}
+
+export function importStage(files: { content: string; name?: string; extension?: string }[]) {
+    let imported = 0
+
+    files.forEach(({ content }) => {
+        let parsed: Partial<StageLayout & { id: string }>
+        try {
+            parsed = JSON.parse(content)
+        } catch (err) {
+            console.error("Failed to import stage layout:", err)
+            return
+        }
+
+        const stageId = parsed.id || uid()
+        delete parsed.id
+
+        if (!isStageLayout(parsed)) return
+
+        const data: StageLayout = {
+            ...parsed,
+            name: parsed.name || "",
+            settings: parsed.settings || {},
+            items: parsed.items || {},
+            modified: Date.now()
+        }
+
+        history({ id: "UPDATE", newData: { data }, oldData: { id: stageId }, location: { page: "stage", id: "stage" } })
+        imported++
+    })
+
+    if (!imported) {
+        newToast("error.import")
+        return
+    }
+
+    if (get(activePopup)) {
+        alertMessage.set("actions.imported")
+        activePopup.set("alert")
+    } else {
+        newToast("actions.imported")
+    }
+
+    function isStageLayout(value: any): value is StageLayout {
+        return !!value && typeof value === "object" && !!value.settings && !!value.items && typeof value.items === "object"
+    }
 }
 
 /// //
@@ -144,7 +229,18 @@ export function importSpecific(data: { content: string; name?: string; extension
     newToast("main.finished")
 }
 
-export function fixShowIssues(show) {
+export function fixShowIssues(show: Show) {
+    if (!show) return null
+
+    if (typeof show.name !== "string") show.name = ""
+    if (!show.category) show.category = null
+    if (!show.slides) show.slides = {}
+    if (!show.layouts) show.layouts = {}
+    if (!show.settings) show.settings = { activeLayout: Object.keys(show.layouts)[0] || "", template: null }
+    if (!show.timestamps) show.timestamps = { created: 0, modified: 0, used: 0 }
+    if (!show.meta) show.meta = {}
+    if (!show.media) show.media = {}
+
     // remove unused children slides
     const allUsedSlides: string[] = Object.keys(show.slides).reduce((ids: string[], slideId: string) => {
         const slide = show.slides[slideId]
@@ -157,12 +253,19 @@ export function fixShowIssues(show) {
 
     Object.keys(show.slides).forEach((slideId: string) => {
         const slide = show.slides[slideId]
+        if (typeof slide !== "object") {
+            // something is wrong
+            delete show.slides[slideId]
+            return
+        }
 
         // remove if unused
         if (!allUsedSlides.includes(slideId) && slide.group === null) {
             delete show.slides[slideId]
             return
         }
+
+        if (!Array.isArray(slide.items)) slide.items = []
 
         // check & fix looping items bug
         if (slide.items?.length < 30) return
@@ -180,6 +283,17 @@ export function fixShowIssues(show) {
 
             previousItem = currentItem
         }
+    })
+
+    Object.values<Slide>(show.slides).forEach((slide) => {
+        // fix undefined items issue
+        slide.items = slide.items?.filter((item) => item !== undefined && item !== null) || []
+
+        // fix undefined lines issue
+        slide.items.forEach((item) => {
+            if (!item.lines) return
+            item.lines = item.lines.filter((line) => line !== undefined)
+        })
     })
 
     return show

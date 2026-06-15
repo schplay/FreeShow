@@ -11,13 +11,18 @@ import {
     activeStage,
     activeStyle,
     alertMessage,
+    audioFolders,
+    audioPlaylists,
     categories,
     companion,
     currentOutputSettings,
     disabledServers,
+    drawerTabsData,
     focusMode,
     folders,
     groups,
+    mediaFolders,
+    openScripture,
     openToolsTab,
     outputs,
     overlays,
@@ -39,7 +44,7 @@ import {
 import { triggerFunction } from "../../utils/common"
 import { translateText } from "../../utils/language"
 import { getAccess } from "../../utils/profile"
-import { showSearch } from "../../utils/search"
+import { formatSearch, showSearch } from "../../utils/search"
 import { runAction } from "../actions/actions"
 import { sortByClosestMatch } from "../actions/apiHelper"
 import { menuClick } from "../context/menuClick"
@@ -48,6 +53,7 @@ import { keysToID } from "../helpers/array"
 import { duplicate } from "../helpers/clipboard"
 import { history } from "../helpers/history"
 import { Main } from "./../../../types/IPC/Main"
+import { getMediaResults, showResult } from "./quicksearchData"
 
 interface QuickSearchValue {
     type: keyof typeof triggerActions
@@ -58,89 +64,162 @@ interface QuickSearchValue {
     aliasMatch: string | null
     description?: string
     data?: any
+    category: string
 }
 
-const MAX_RESULTS = 10
-export function quicksearch(searchValue: string) {
+const MAX_RESULTS_NORMAL = 5
+const MAX_RESULTS_LARGE = 10
+
+export type SearchCategory = "show" | "settings" | "stage" | "overlays" | "projects" | "actions" | "navigation" | "faq" | "shows" | "media" | "audio" | "bible"
+export const quickSearchCategoryNames: Record<SearchCategory, string> = {
+    show: "formats.show",
+    settings: "menu.settings",
+    stage: "menu.stage",
+    overlays: "tabs.overlays",
+    projects: "guide_title.projects",
+    actions: "tabs.actions",
+    navigation: "settings.general",
+    faq: "FAQ",
+    shows: "tabs.shows",
+    media: "tabs.media",
+    audio: "tabs.audio",
+    bible: "tabs.scripture"
+}
+
+export async function quicksearch(searchValue: string, categoryFilter: null | SearchCategory = null) {
+    const rawSearchValue = searchValue
+    searchValue = formatSearch(searchValue)
     const values: QuickSearchValue[] = []
-    const shouldReturn = () => values.length >= MAX_RESULTS
-    const trimValues = () => values.slice(0, MAX_RESULTS)
+    const trimValues = (array: any[], max: number = MAX_RESULTS_NORMAL) => array.slice(0, max)
     const sort = (array: any[]) => sortByClosestMatch(array, searchValue)
 
-    if (get(activePage) === "show" && get(activeShow)?.type === "show") {
-        addValues(sort(getShowActions()).slice(0, 5), "custom_actions")
-        if (shouldReturn()) return trimValues()
+    let currentCategory: SearchCategory = "show"
+    const isVisible = (cat: SearchCategory) => {
+        currentCategory = cat
+        return categoryFilter ? categoryFilter === cat : true
     }
 
-    if (get(activePage) === "edit" && !get(activeEdit)?.id && get(activeShow)?.type === "show") {
-        addValues(sort(getEditActions()).slice(0, 5), "custom_actions")
-        if (shouldReturn()) return trimValues()
+    // --- ACTIVE SHOW ---
+    if (isVisible("show")) {
+        if (get(activePage) === "show" && get(activeShow)?.type === "show") {
+            addValues(trimValues(sort(getShowActions())), "custom_actions")
+        }
+
+        if (get(activePage) === "edit" && !get(activeEdit)?.id && get(activeShow)?.type === "show") {
+            addValues(trimValues(sort(getEditActions())), "custom_actions")
+        }
     }
 
-    // outputs
-    addValues(sort(keysToID(get(outputs))).slice(0, 5), "settings_output", "display_settings")
-    if (shouldReturn()) return trimValues()
+    // --- SETTINGS ---
+    if (isVisible("settings")) {
+        // outputs
+        addValues(trimValues(sort(keysToID(get(outputs)))), "settings_output", "display_settings")
 
-    // styles
-    addValues(sort(keysToID(get(styles))).slice(0, 5), "settings_styles", "styles")
-    if (shouldReturn()) return trimValues()
+        // styles
+        addValues(trimValues(sort(keysToID(get(styles)))), "settings_styles", "styles")
 
-    // profiles
-    addValues(sort(keysToID(get(profiles))).slice(0, 5), "settings_profiles", "profiles")
-    if (shouldReturn()) return trimValues()
+        // profiles
+        addValues(trimValues(sort(keysToID(get(profiles)))), "settings_profiles", "profiles")
+    }
 
-    // stage layouts
-    addValues(sort(keysToID(get(stageShows))).slice(0, 5), "stage_layout", "stage")
-    if (shouldReturn()) return trimValues()
+    // --- STAGE LAYOUTS ---
+    if (isVisible("stage")) {
+        const stageLayouts = trimValues(sort(keysToID(get(stageShows))))
+        addValues(stageLayouts, "stage_layout", "stage")
+    }
 
-    // overlays
-    addValues(sort(keysToID(get(overlays))).slice(0, 5), "overlay", "overlays")
-    if (shouldReturn()) return trimValues()
+    // --- OVERLAYS ---
+    if (isVisible("overlays")) {
+        const overlaysList = trimValues(sort(keysToID(get(overlays))))
+        addValues(overlaysList, "overlay", "overlays")
+    }
 
-    // projects
-    addValues(sort(keysToID(get(projects))).slice(0, 5), "project", "project")
-    if (shouldReturn()) return trimValues()
+    // --- PROJECTS ---
+    if (isVisible("projects")) {
+        const projectsList = trimValues(sort(keysToID(get(projects))), MAX_RESULTS_LARGE)
+        addValues(projectsList, "project", "project")
+    }
 
-    // actions
-    addValues(sort(keysToID(get(actions))).slice(0, 2), "action", "actions")
-    if (shouldReturn()) return trimValues()
+    // --- ACTIONS ---
+    if (isVisible("actions")) {
+        const actionsList = trimValues(sort(keysToID(get(actions))), 2)
+        addValues(actionsList, "action", "actions")
+    }
 
-    // main pages
-    addValues(sort(getMainPages()).slice(0, 2), "main_page")
-    if (shouldReturn()) return trimValues()
+    // --- NAVIGATION ---
+    if (isVisible("navigation")) {
+        // main pages
+        addValues(trimValues(sort(getMainPages()), 2), "main_page")
 
-    // drawer submenus
-    addValues(sort(getDrawerSubmenus()).slice(0, 3), "drawer_submenu")
-    if (shouldReturn()) return trimValues()
+        // drawer submenus
+        addValues(trimValues(sort(getDrawerSubmenus()), 3), "drawer_submenu")
 
-    // menu bar
-    addValues(sort(getMenubarItems()).slice(0, 3), "context_menu")
-    if (shouldReturn()) return trimValues()
+        // menu bar
+        addValues(trimValues(sort(getMenubarItems()), 3), "context_menu")
 
-    // popups
-    addValues(sort(getPopups()).slice(0, 3), "popups")
-    if (shouldReturn()) return trimValues()
+        // popups
+        addValues(trimValues(sort(getPopups()), 3), "popups")
 
-    // settings
-    addValues(sort(getSettings()).slice(0, 3), "settings")
-    if (shouldReturn()) return trimValues()
+        // settings
+        addValues(trimValues(sort(getSettings()), 3), "settings")
 
-    // connections
-    addValues(sort(connectionsList), "settings_connection", "connection")
-    if (shouldReturn()) return trimValues()
+        // connections
+        addValues(sort(connectionsList), "settings_connection", "connection")
+    }
 
-    // faq
-    addValues(sort(getFaq()).slice(0, 3), "faq")
-    if (shouldReturn()) return trimValues()
+    // --- FAQ ---
+    if (isVisible("faq")) {
+        addValues(trimValues(sort(getFaq()), 3), "faq")
+    }
 
-    // shows
-    const shows = showSearch(searchValue, get(sortedShowsList).filter(a => !get(categories)[a.category || ""]?.isArchive))
-    addValues(shows, "show", "slide")
+    // --- SHOWS ---
+    if (isVisible("shows")) {
+        const allShows = get(sortedShowsList).filter((a) => !get(categories)[a.category || ""]?.isArchive)
+        // const shows = fastSearch(searchValue, allShows)
+        const shows = showSearch(searchValue, allShows)
+        const showsWithPreview = trimValues(shows, MAX_RESULTS_LARGE).map((show) => showResult(show, rawSearchValue))
+        addValues(showsWithPreview, "show", "slide")
+    }
 
-    return trimValues()
+    // --- MEDIA ---
+    if (isVisible("media")) {
+        const folderPaths = Object.values(get(mediaFolders)).map((a) => a.path!)
+        const mediaResults = trimValues(await getMediaResults(searchValue, folderPaths), MAX_RESULTS_LARGE)
+        addValues(mediaResults, "media")
+    }
 
-    function addValues(items: any[], type: keyof typeof triggerActions, icon = "") {
-        const newValues: QuickSearchValue[] = items.map((a) => ({ type, icon: a.icon || icon, id: a.id, name: a.name, color: a.color, data: a.data || null, aliasMatch: a.aliasMatch || null }))
+    // --- AUDIO ---
+    if (isVisible("audio")) {
+        // playlists
+        const playlists = trimValues(sort(keysToID(get(audioPlaylists))))
+        addValues(playlists, "audio_playlist", "playlist")
+
+        // audio files
+        const folderPaths = Object.values(get(audioFolders)).map((a) => a.path!)
+        const audioMedia = trimValues(await getMediaResults(searchValue, folderPaths), MAX_RESULTS_LARGE)
+        addValues(audioMedia, "media")
+    }
+
+    // --- BIBLE ---
+    // if (isVisible("bible")) {
+    //     const bibleResults = trimValues(await getBibleResults(searchValue), MAX_RESULTS_LARGE)
+    //     addValues(bibleResults, "bible", "bible")
+    // }
+
+    return values
+
+    function addValues(items: any[], type: keyof typeof triggerActions, icon: string = "") {
+        const newValues: QuickSearchValue[] = items.map((a) => ({
+            type,
+            icon: a.icon || icon,
+            id: a.id,
+            name: a.name,
+            color: a.color,
+            data: a.data || null,
+            aliasMatch: a.aliasMatch || null,
+            description: a.description || null,
+            category: currentCategory
+        }))
         values.push(...newValues)
     }
 }
@@ -165,7 +244,7 @@ const triggerActions = {
         if (data.globalGroup) {
             const show = get(showsCache)[get(activeShow)!.id]
             if (show?.locked) {
-                alertMessage.set("show.locked_info")
+                alertMessage.set("show.locked")
                 activePopup.set("alert")
                 return
             }
@@ -348,10 +427,38 @@ const triggerActions = {
                 activeShow.set({ ...newShow, index: newIndex })
             }
         }
+    },
+    bible: (_id: string, data: any) => {
+        openDrawer("scripture")
+
+        if (data?.reference) openScripture.set({ ...data.reference, play: data.play })
+    },
+    audio_playlist: (id: string) => {
+        openDrawer("audio")
+
+        drawerTabsData.update((a) => {
+            if (a.audio) a.audio.activeSubTab = id
+            return a
+        })
+    },
+    media: (id: string, data: any) => {
+        const path = id
+        const type = data?.type
+
+        if (type === "media" || type === "audio") activeEdit.set({ id: path, type: type === "audio" ? "audio" : "media", items: [] })
+
+        const showRef: any = { id: path, type }
+        showRef.name = data?.name || ""
+        activeShow.set(showRef)
+
+        activePage.set("show")
+        if (get(focusMode)) focusMode.set(false)
     }
 }
 
 export function selectQuicksearchValue(value: QuickSearchValue, control: boolean) {
+    if (!value) return
+
     if (!triggerActions[value.type]) {
         console.error("Unknown Quick search type:", value.type)
         return
@@ -440,11 +547,9 @@ function getMenubarItems() {
 const drawerSubmenus = [
     // media
     { id: "online", name: "media.online", icon: "web" },
-    { id: "screens", name: "live.screens", icon: "screen" },
-    { id: "cameras", name: "live.cameras", icon: "camera" },
+    { id: "media_inputs", name: "emitters.inputs", icon: "input", aliases: ["live.screens", "live.windows", "NDI®", "live.cameras"] },
     // audio
-    { id: "microphones", name: "live.microphones", icon: "microphone" },
-    { id: "audio_streams", name: "live.audio_streams", icon: "audio_stream" },
+    { id: "audio_inputs", name: "emitters.inputs", icon: "input", aliases: ["live.microphones", "live.audio_streams"] },
     // overlays
     { id: "effects", name: "tabs.effects", icon: "effect" },
     // calendar
@@ -452,8 +557,7 @@ const drawerSubmenus = [
     // functions
     { id: "actions", name: "tabs.actions", icon: "actions", aliases: ["-Macros"] },
     { id: "timer", name: "tabs.timers", icon: "timer" },
-    { id: "variables", name: "tabs.variables", icon: "variable" },
-    { id: "triggers", name: "tabs.triggers", icon: "trigger" }
+    { id: "variables", name: "tabs.variables", icon: "variable" }
 ]
 
 function getDrawerSubmenus() {
@@ -476,8 +580,7 @@ const popups = [
     { id: "action", name: "new.action", icon: "add", data: { drawerTab: "actions" }, aliases: ["-New macro"] },
     { id: "timer", name: "new.timer", icon: "add", data: { drawerTab: "timer" } },
     { id: "variable", name: "new.variable", icon: "add", data: { drawerTab: "variables" } },
-    { id: "trigger", name: "new.trigger", icon: "add", data: { drawerTab: "triggers" } },
-    { id: "audio_stream", name: "new.audio_stream", icon: "add", data: { drawerTab: "audio_streams" } },
+    { id: "audio_stream", name: "new.audio_stream", icon: "add", data: { drawerTab: "audio_inputs" } },
     { id: "output", name: "settings.new_output", icon: "add", data: { settingsTab: "display_settings" } },
     { id: "style", name: "new.style", icon: "add", data: { settingsTab: "styles" } },
     { id: "profile", name: "new.profile", icon: "add", data: { settingsTab: "profiles" } },
@@ -490,7 +593,7 @@ const popups = [
     { id: "effect", name: "new.effect", icon: "add", data: { drawerTab: "effects" } },
     { id: "template", name: "new.template", icon: "add", data: { drawerTab: "templates" } },
     // logs
-    { id: "error_log", name: "actions.open_error_log", icon: "document", data: { settingsTab: "other" }, aliases: ["-Freeze"] },
+    { id: "error_log", name: "actions.open_error_log", icon: "document", data: { settingsTab: "other" }, aliases: ["-Freeze"] }
 ]
 
 function getPopups() {
@@ -502,40 +605,14 @@ const settings = [
         id: "general",
         name: "settings.general",
         icon: "general",
-        aliases: [
-            "settings.language",
-            "settings.use24hClock",
-            "settings.disable_labels",
-            "settings.default_project_name",
-            "settings.startup_projects_list",
-            "settings.auto_output",
-            "settings.hide_cursor_in_output",
-            "settings.clear_media_when_finished",
-            "settings.capitalize_words",
-            "settings.transparent_slides",
-            "settings.full_colors",
-            "settings.slide_number_keys",
-            "settings.auto_shortcut_first_letter"
-        ]
+        aliases: ["settings.language", "settings.use24hClock", "settings.disable_labels", "settings.default_project_name", "settings.startup_projects_list", "settings.auto_output", "settings.hide_cursor_in_output", "settings.clear_media_when_finished", "settings.capitalize_words", "settings.transparent_slides", "settings.full_colors", "settings.slide_number_keys", "settings.auto_shortcut_first_letter"]
     },
     { id: "display_settings", name: "settings.display_settings", icon: "display_settings", aliases: ["settings.active_style", "settings.output_screen", "settings.always_on_top", "NDI®", "-Livestream", "-Stage", "-HDMI"] },
     {
         id: "styles",
         name: "settings.styles",
         icon: "styles",
-        aliases: [
-            "-Looks",
-            "edit.background_color",
-            "edit.background_media",
-            "popup.transition",
-            "edit.media_fit",
-            "settings.aspect_ratio",
-            "settings.active_layers",
-            "settings.lines",
-            "settings.override_with_template",
-            "settings.override_scripture_with_template",
-            "meta.display_metadata"
-        ]
+        aliases: ["-Looks", "edit.background_color", "edit.background_media", "popup.transition", "edit.media_fit", "settings.aspect_ratio", "settings.active_layers", "settings.lines", "settings.override_with_template", "settings.override_scripture_with_template", "meta.display_metadata"]
     },
     { id: "connection", name: "settings.connection", icon: "connection", aliases: ["Planning Center", "ChurchApps", "-Network", "-LAN"] },
     {
@@ -560,6 +637,7 @@ const faq = [
     { id: "https://freeshow.app/docs/overlays", name: "About Overlays", icon: "help" },
     { id: "https://freeshow.app/docs/templates", name: "About Templates", icon: "help" },
     { id: "https://freeshow.app/docs/outputs", name: "Multiple Outputs", icon: "help", aliases: ["-Livestream", "-OBS"] },
+    { id: "https://freeshow.app/docs/cloud", name: "Cloud Sync", icon: "help" },
     // Docs Help
     { id: "https://freeshow.app/docs/scripture#create-a-collection", name: "Multiple Scripture Versions", icon: "help", aliases: ["-Multilingual", "-Multiple translations", "-Multiple Bibles", "-Multiple languages"] },
     { id: "https://freeshow.app/docs/faq#multilingual-songs", name: "Multilingual Song Lyrics", icon: "help", aliases: ["-Multilingual", "-translations", "-lyrics", "-languages", "-translated"] },

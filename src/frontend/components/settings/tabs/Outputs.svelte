@@ -5,20 +5,18 @@
     import { Option } from "../../../../types/Main"
     import type { Output } from "../../../../types/Output"
     import { AudioAnalyser } from "../../../audio/audioAnalyser"
-    import { activePage, activeStage, activeStyle, currentOutputSettings, ndiData, os, outputDisplay, outputs, settingsTab, stageShows, styles, toggleOutputEnabled } from "../../../stores"
+    import { activePage, activePopup, activeStage, activeStyle, alertMessage, currentOutputSettings, ndiData, os, outputDisplay, outputs, saved, settingsTab, stageShows, styles, toggleOutputEnabled } from "../../../stores"
     import { newToast } from "../../../utils/common"
     import { translateText } from "../../../utils/language"
     import { destroy, receive, send } from "../../../utils/request"
-    import T from "../../helpers/T.svelte"
     import { clone, keysToID, sortByName, sortObject } from "../../helpers/array"
-    import { refreshOut, toggleOutput } from "../../helpers/output"
+    import { refreshOut, startStreaming, stopStreaming, toggleOutput, updateOutputWebrtcData } from "../../helpers/output"
     import InputRow from "../../input/InputRow.svelte"
     import Title from "../../input/Title.svelte"
-    import CombinedInput from "../../inputs/CombinedInput.svelte"
-    import Dropdown from "../../inputs/Dropdown.svelte"
     import MaterialButton from "../../inputs/MaterialButton.svelte"
     import MaterialDropdown from "../../inputs/MaterialDropdown.svelte"
     import MaterialPopupButton from "../../inputs/MaterialPopupButton.svelte"
+    import MaterialTextInput from "../../inputs/MaterialTextInput.svelte"
     import MaterialToggleSwitch from "../../inputs/MaterialToggleSwitch.svelte"
 
     let outputsList: Output[] = []
@@ -53,21 +51,30 @@
             setTimeout(refreshOut)
         }
 
-        if (key === "ndi") {
+        if (key === "ndi" || key === "webrtc") {
             if (value) {
                 newToast("toast.output_capture_enabled")
 
-                const enabledOutputs = Object.values($outputs).filter((a) => a.enabled && !a.stageOutput)
+                // auto enable transparent & invisible if more than 1 non invisible output enabled
+                const enabledOutputs = Object.values($outputs).filter((a) => a.enabled && !a.stageOutput && !a.invisible)
                 if (enabledOutputs.length > 1) {
                     updateOutput("transparent", true)
                     updateOutput("invisible", true)
                 }
+
+                if (key === "ndi") ndiMenuOpened = true
+                else webrtcMenuOpened = true
             }
         } else if (key === "blackmagic") {
             if (value === true) {
                 // send(BLACKMAGIC, ["GET_DEVICES"])
                 updateOutput("transparent", true)
                 updateOutput("invisible", true)
+
+                // Set default resolution (backend will adjust based on display mode)
+                const blackmagicBounds = { ...currentOutput?.bounds, width: 1920, height: 1080 }
+                updateOutput("bounds", blackmagicBounds)
+                updateOutput("screen", null)
             } else {
                 send(BLACKMAGIC, ["STOP_SENDER"], { id: outputId })
             }
@@ -114,8 +121,11 @@
                 }
             }
 
+            if (key === "webrtc") {
+                if (!value) AudioAnalyser.recorderDeactivate()
+            }
+
             if (key === "enabled") {
-                // , rate: $special.previewRate || "auto"
                 if (value) send(OUTPUT, ["CREATE"], currentOutput)
                 else {
                     send(OUTPUT, ["REMOVE"], { id: outputId })
@@ -129,7 +139,9 @@
 
             // UPDATE OUTPUT WINDOW
 
-            if (["alwaysOnTop", "kioskMode", "transparent", "invisible", "ndi"].includes(key)) {
+            if (["blackmagic"].includes(key)) {
+                send(OUTPUT, ["SET_VALUE"], { id: outputId, key, value: a[outputId] })
+            } else if (["alwaysOnTop", "kioskMode", "transparent", "invisible", "ndi", "webrtc"].includes(key)) {
                 send(OUTPUT, ["SET_VALUE"], { id: outputId, key, value })
             }
 
@@ -166,7 +178,6 @@
         if (!newData) newData = {}
 
         let value = e?.detail?.id ?? e
-        console.log(key, value)
 
         newData[key] = value
 
@@ -178,6 +189,24 @@
             if (value) AudioAnalyser.recorderActivate()
             else AudioAnalyser.recorderDeactivate()
         }
+
+        if (key === "name" || key === "groups") {
+            alertMessage.set("settings.restart_for_change")
+            activePopup.set("alert")
+            saved.set(false)
+        }
+    }
+
+    // webrtc
+    function updateWebrtcData(e: any, key: string) {
+        let id = currentOutput?.id
+        if (!id) return
+
+        let value = e?.detail?.id ?? e
+        const updated = updateOutputWebrtcData(id, key, value)
+        if (!updated) return
+
+        saved.set(false)
     }
 
     const framerates = [
@@ -193,6 +222,12 @@
 
     // blackmagic
     let blackmagicDevices: Option[] = []
+    function getUsedBlackmagicDeviceIds(excludeId = "") {
+        return Object.entries($outputs)
+            .filter(([id, o]: any) => id !== excludeId && o.blackmagic && o.blackmagicData?.deviceId)
+            .map(([_id, o]: any) => String(o.blackmagicData.deviceId))
+    }
+
     function updateBlackmagicData(e: any, key: string) {
         let id = currentOutput?.id
         if (!id) return
@@ -200,6 +235,15 @@
         let newData = $outputs[id]?.blackmagicData
         if (!newData) newData = {}
         let value = e?.detail?.id || e?.detail?.name || e
+
+        if (key === "deviceId") {
+            const usedIds = getUsedBlackmagicDeviceIds(id)
+            if (usedIds.includes(String(value))) {
+                newToast("Device already in use by another output.")
+                return
+            }
+        }
+
         newData[key] = value
 
         updateOutput("blackmagicData", newData)
@@ -237,13 +281,15 @@
 
                 // allow data to update first
                 setTimeout(() => {
-                    send(OUTPUT, ["SET_VALUE"], { id: currentOutput?.id, key: "blackmagic", value: currentOutput })
+                    if (newData.displayMode && newData.pixelFormat) send(OUTPUT, ["SET_VALUE"], { id: currentOutput?.id, key: "blackmagic", value: currentOutput })
                 })
-            } else if (key === "pixelFormat") {
+            } else if (key === "pixelFormat" || key === "alphaKey") {
                 setTimeout(() => {
-                    send(OUTPUT, ["SET_VALUE"], { id: currentOutput?.id, key: "blackmagic", value: currentOutput })
+                    if (newData.displayMode && newData.pixelFormat) send(OUTPUT, ["SET_VALUE"], { id: currentOutput?.id, key: "blackmagic", value: currentOutput })
                 })
             }
+
+            saved.set(false)
         })
     }
 
@@ -255,13 +301,38 @@
     onDestroy(() => destroy(BLACKMAGIC, listenerId))
     const receiveBMD = {
         GET_DEVICES: (data) => {
-            blackmagicDevices = JSON.parse(data).map((a) => ({ id: a.deviceHandle, name: a.displayName || a.modelName, data: { displayModes: a.inputDisplayModes } }))
-            if (blackmagicDevices.length && !currentOutput?.blackmagicData?.deviceId) updateBlackmagicData(blackmagicDevices[0].id, "deviceId")
+            const parsedData = JSON.parse(data)
+            blackmagicDevices = parsedData.map((a) => ({
+                id: a.deviceHandle,
+                name: a.displayName || a.modelName,
+                data: {
+                    displayModes: a.outputDisplayModes || a.inputDisplayModes,
+                    supportsInternalKeying: a.supportsInternalKeying || false,
+                    supportsExternalKeying: a.supportsExternalKeying || false
+                }
+            }))
+            // auto-select first available device (not in use)
+            if (blackmagicDevices.length && (!currentOutput?.blackmagicData?.deviceId || !currentOutput?.blackmagicData?.displayModes?.length)) {
+                const usedIds = getUsedBlackmagicDeviceIds(currentOutput?.id)
+                const availableDevice = blackmagicDevices.find((d) => !usedIds.includes(String(d.id || "")))
+                if (availableDevice) updateBlackmagicData({ detail: { id: availableDevice.id } }, "deviceId")
+            }
         }
     }
     receive(BLACKMAGIC, receiveBMD, listenerId)
 
-    $: outputLabel = `${currentOutput?.bounds?.width || 1920}x${currentOutput?.bounds?.height || 1080}`
+    // Check if alpha keying is supported by the device
+    function isAlphaSupported(): boolean {
+        const device = blackmagicDevices.find((a) => a.id === currentOutput?.blackmagicData?.deviceId)
+        if (!device) return false
+        return device.data?.supportsInternalKeying || device.data?.supportsExternalKeying || false
+    }
+
+    $: outputLabel = currentOutput?.blackmagicData?.displayMode || `${currentOutput?.bounds?.width || 1920}x${currentOutput?.bounds?.height || 1080}`
+
+    let ndiMenuOpened = false
+    let bmdMenuOpened = false
+    let webrtcMenuOpened = false
 </script>
 
 {#if outputsList.filter((a) => !a.stageOutput).length > 1 || !currentOutput?.enabled || currentOutput?.stageOutput}
@@ -290,13 +361,7 @@
 <!-- window -->
 <Title label="settings.window" icon="window" />
 
-<MaterialPopupButton
-    label="settings.output_screen"
-    value={outputLabel}
-    name={outputLabel}
-    icon={currentOutput?.invisible ? "stage" : currentOutput?.boundsLocked ? "locked" : "screen"}
-    popupId={currentOutput?.invisible ? "change_output_values" : "choose_screen"}
-/>
+<MaterialPopupButton label="settings.output_screen" value={outputLabel} name={outputLabel} icon={currentOutput?.invisible ? "stage" : currentOutput?.boundsLocked ? "locked" : "screen"} popupId={currentOutput?.invisible ? "change_output_values" : "choose_screen"} />
 <MaterialToggleSwitch label="settings.always_on_top" checked={currentOutput?.alwaysOnTop !== false} defaultValue={true} disabled={currentOutput?.invisible} on:change={(e) => updateOutput("alwaysOnTop", e.detail)} />
 
 <!-- this will make the whole application "locked" so no other apps can be accessed, might increase performance, but generally not recommend -->
@@ -307,53 +372,78 @@
 {/if}
 
 <!-- NDI -->
-<Title label="NDI®" icon="companion" />
+<Title label="NDI®" icon="ndi" />
 
-<MaterialToggleSwitch label="actions.enable NDI®" checked={currentOutput?.ndi} defaultValue={false} data={$ndiData[currentOutput?.id || ""]?.connections || null} on:change={(e) => updateOutput("ndi", e.detail)} />
+<InputRow arrow={currentOutput?.ndi} bind:open={ndiMenuOpened}>
+    <MaterialToggleSwitch label="actions.enable NDI®" style="width: 100%;" checked={currentOutput?.ndi} defaultValue={false} data={$ndiData[currentOutput?.id || ""]?.connections || null} on:change={(e) => updateOutput("ndi", e.detail)} />
 
-{#if currentOutput?.ndi}
-    <MaterialToggleSwitch label="preview.audio" checked={currentOutput.ndiData?.audio} defaultValue={false} on:change={(e) => updateNdiData(e.detail, "audio")} />
-    <MaterialDropdown label="settings.frame_rate" value={currentOutput?.ndiData?.framerate || "30"} defaultValue="30" options={framerates} on:change={(e) => updateNdiData(e.detail, "framerate")} />
-{/if}
+    <svelte:fragment slot="menu">
+        {#if currentOutput}
+            <InputRow>
+                <MaterialTextInput label="inputs.name" value={currentOutput.ndiData?.name || `FreeShow NDI${currentOutput.name ? ` - ${currentOutput.name}` : ""}`} defaultValue={`FreeShow NDI${currentOutput.name ? ` - ${currentOutput.name}` : ""}`} on:change={(e) => updateNdiData(e.detail, "name")} />
+                <MaterialTextInput label="inputs.group" title="settings.comma_seperated" value={currentOutput.ndiData?.groups || ""} defaultValue="" placeholder="public" on:change={(e) => updateNdiData(e.detail, "groups")} />
+            </InputRow>
+
+            <MaterialToggleSwitch label="preview.audio" checked={currentOutput.ndiData?.audio} defaultValue={false} on:change={(e) => updateNdiData(e.detail, "audio")} />
+            <MaterialDropdown label="settings.frame_rate" value={currentOutput.ndiData?.framerate || "30"} defaultValue="30" options={framerates} on:change={(e) => updateNdiData(e.detail, "framerate")} />
+        {/if}
+    </svelte:fragment>
+</InputRow>
 
 <!-- Blackmagic -->
-<!-- BLACKMAGIC CURRENTLY NOT WORKING -->
-<!-- <h3>Blackmagic Design</h3>
+<Title label="Blackmagic Design" icon="blackmagic" />
 
-<CombinedInput>
-    <p><T id="actions.enable" /> Blackmagic</p>
-    <div class="alignRight">
-        <Checkbox checked={currentOutput.blackmagic} on:change={(e) => updateOutput("blackmagic", isChecked(e))} />
+<InputRow arrow={currentOutput?.blackmagic} bind:open={bmdMenuOpened}>
+    <MaterialToggleSwitch label="actions.enable Blackmagic" style="width: 100%;" checked={currentOutput?.blackmagic} defaultValue={false} on:change={(e) => updateOutput("blackmagic", e.detail)} />
+
+    <svelte:fragment slot="menu">
+        <MaterialDropdown
+            label="settings.device"
+            value={currentOutput?.blackmagicData?.deviceId || ""}
+            options={(() => {
+                const usedIds = getUsedBlackmagicDeviceIds(currentOutput?.id)
+                return blackmagicDevices.map((device) => ({
+                    label: usedIds.includes(String(device.id || "")) ? `${device.name} (in use)` : device.name,
+                    value: device.id ? String(device.id) : "",
+                    disabled: usedIds.includes(String(device.id))
+                }))
+            })()}
+            on:change={(e) => updateBlackmagicData(e.detail, "deviceId")}
+        />
+
+        {#if currentOutput?.blackmagicData?.deviceId}
+            <InputRow>
+                <MaterialDropdown label="settings.display_mode" value={currentOutput.blackmagicData?.displayMode} options={currentOutput.blackmagicData?.displayModes?.map((mode) => ({ label: mode.name, value: mode.name })) || []} on:change={(e) => updateBlackmagicData(e.detail, "displayMode")} />
+                <MaterialDropdown label="settings.pixel_format" value={currentOutput.blackmagicData?.pixelFormat} options={currentOutput.blackmagicData?.pixelFormats?.map((format) => ({ label: format.name, value: format.name })) || []} on:change={(e) => updateBlackmagicData(e.detail, "pixelFormat")} />
+            </InputRow>
+
+            {#if isAlphaSupported()}
+                <MaterialToggleSwitch label="settings.alpha_key" checked={currentOutput.blackmagicData?.alphaKey} on:change={(e) => updateBlackmagicData(e.detail, "alphaKey")} />
+            {/if}
+        {/if}
+    </svelte:fragment>
+</InputRow>
+
+<!-- WebRTC -->
+<Title label="WebRTC Streaming" icon="record" />
+
+<InputRow arrow={currentOutput?.webrtc} bind:open={webrtcMenuOpened}>
+    <MaterialToggleSwitch label="actions.enable WebRTC" style="width: 100%;" checked={currentOutput?.webrtc} defaultValue={false} on:change={(e) => updateOutput("webrtc", e.detail)} />
+
+    <svelte:fragment slot="menu">
+        {#if currentOutput}
+            <MaterialTextInput label="WHIP Endpoint URL" value={currentOutput.webrtcData?.url || ""} placeholder="e.g. https://live.restream.io/whip/live/YOUR_KEY" on:change={(e) => updateWebrtcData(e.detail, "url")} />
+            <MaterialTextInput label="Bearer Token (Optional)" value={currentOutput.webrtcData?.token || ""} placeholder="Authorization token" on:change={(e) => updateWebrtcData(e.detail, "token")} />
+        {/if}
+    </svelte:fragment>
+</InputRow>
+
+{#if currentOutput?.webrtc && currentOutput?.webrtcData?.url}
+    <div style="padding-bottom: 10px;">
+        <MaterialButton variant="outlined" icon={currentOutput.webrtcData?.streaming ? "stop" : "record"} style="width: 100%; justify-content: center; {currentOutput.webrtcData?.streaming ? 'background: #b60707 !important;' : ''}" on:click={() => (currentOutput?.webrtcData?.streaming ? stopStreaming(currentOutput.id, true) : startStreaming(currentOutput?.id))} white>
+            {translateText(currentOutput.webrtcData?.streaming ? "output.stop_streaming" : "output.start_streaming")}
+        </MaterialButton>
     </div>
-</CombinedInput> -->
-
-{#if currentOutput?.blackmagic}
-    <CombinedInput>
-        <p><T id="settings.device" /></p>
-        <Dropdown value={blackmagicDevices.find((a) => a.id === currentOutput?.blackmagicData?.deviceId)?.name || "—"} options={blackmagicDevices} on:click={(e) => updateBlackmagicData(e, "deviceId")} />
-    </CombinedInput>
-
-    {#if currentOutput.blackmagicData?.deviceId}
-        <CombinedInput>
-            <p><T id="settings.display_mode" /></p>
-            <Dropdown
-                value={currentOutput.blackmagicData?.displayModes?.find((a) => a.name === currentOutput?.blackmagicData?.displayMode)?.name || "—"}
-                options={currentOutput.blackmagicData?.displayModes || []}
-                on:click={(e) => updateBlackmagicData(e, "displayMode")}
-            />
-        </CombinedInput>
-
-        <CombinedInput>
-            <p><T id="settings.pixel_format" /></p>
-            <Dropdown
-                value={currentOutput.blackmagicData?.pixelFormats?.find((a) => a.name === currentOutput?.blackmagicData?.pixelFormat)?.name || "—"}
-                options={currentOutput.blackmagicData?.pixelFormats || []}
-                on:click={(e) => updateBlackmagicData(e, "pixelFormat")}
-            />
-        </CombinedInput>
-
-        <MaterialToggleSwitch label="settings.alpha_key" checked={currentOutput.blackmagicData?.alphaKey} on:change={(e) => updateBlackmagicData(e.detail, "alphaKey")} />
-    {/if}
 {/if}
 
 {#if currentOutput?.ndi || currentOutput?.blackmagic}

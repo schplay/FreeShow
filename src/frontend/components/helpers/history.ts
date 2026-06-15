@@ -1,14 +1,14 @@
 import { get } from "svelte/store"
 import type { History, HistoryNew, HistoryTypes } from "../../../types/History"
-import { activePage, driveData, historyCacheCount, undoHistory } from "../../stores"
+import { activePage, historyCacheCount, isDev, undoHistory } from "../../stores"
 import { redoHistory } from "./../../stores"
 import { clone } from "./array"
 import { historyActions } from "./historyActions"
+import { createStore, createStoreHistory, deleteStore, deleteStoreHistory, updateStore, updateStoreHistory } from "./historyStores"
 import { deselect } from "./select"
 import { loadShows } from "./setShow"
-import { _show } from "./shows"
 import { removeTemplatesFromShow } from "./show"
-import { createStore, createStoreHistory, deleteStore, deleteStoreHistory, updateStore, updateStoreHistory } from "./historyStores"
+import { _show } from "./shows"
 
 // override previous history
 const override = ["textAlign", "textStyle", "deleteItem", "setItems", "setStyle", "slideStyle", "STAGE"]
@@ -55,13 +55,13 @@ export function history(obj: History, shouldUndo: null | boolean = null) {
                         .slides([obj.location.slide!])
                         .items(obj.location.items)
                         .lines(obj.location.lines! || [])
-                        .set(obj.newData.style),
+                        .set(obj.newData.style)
                 }
                 // CSS text style
                 // if (obj.newData?.style?.key === "text-style" && old.style.values?.[0]?.[0]) old.style.values = old.style.values[0]
 
                 // remove templates because slide has manual updates
-                if (!shouldUndo) removeTemplatesFromShow(showID || "")
+                if (!shouldUndo) removeTemplatesFromShow(showID || "", obj.location.slide)
                 break
             case "setItems":
             case "setStyle":
@@ -69,24 +69,24 @@ export function history(obj: History, shouldUndo: null | boolean = null) {
                     style: _show(showID)
                         .slides([obj.location?.slide || ""])
                         .items(obj.location.items)
-                        .set(obj.newData.style),
+                        .set(obj.newData.style)
                 }
 
                 // remove templates because slide has manual updates
-                if (!shouldUndo) removeTemplatesFromShow(showID || "")
+                if (!shouldUndo) removeTemplatesFromShow(showID || "", obj.location?.slide)
                 break
             case "slideStyle":
                 old = {
                     style: _show(showID)
                         .slides([obj.location?.slide || ""])
-                        .set({ key: "settings", value: obj.newData.style }),
+                        .set({ key: "settings", value: obj.newData.style })
                 }
                 break
             case "slide":
                 old = {
                     slides: _show(showID).set({ key: "slides", value: obj.newData.slides }),
                     layout: _show(showID).layouts([obj.location.layout!]).set({ key: "slides", value: obj.newData.layout })[0]?.value,
-                    media: _show(showID).set({ key: "media", value: obj.newData.media || _show(showID).get("media") }),
+                    media: _show(showID).set({ key: "media", value: obj.newData.media || _show(showID).get("media") || {} })
                 }
                 break
 
@@ -110,18 +110,12 @@ export function history(obj: History, shouldUndo: null | boolean = null) {
                 } else {
                     const layoutRefSlide = _show(showID).layouts([obj.location.layout!]).ref()[0]?.[obj.location.layoutSlide!]
                     if (layoutRefSlide) {
-                        const cloudId = get(driveData).mediaId
-                        if (layoutRefSlide.data.background && cloudId && cloudId !== "default") {
-                            bgid = layoutRefSlide.data.background
-                            _show(showID).media().add(obj.newData, bgid)
-                        } else {
-                            // look for existing media
-                            const existing = _show(showID)
-                                .media()
-                                .get()
-                                .find((a) => a.path === obj.newData.path)
-                            if (existing) bgid = existing.key
-                        }
+                        // look for existing media
+                        const existing = _show(showID)
+                            .media()
+                            .get()
+                            .find((a) => a.path === obj.newData.path)
+                        if (existing) bgid = existing.key
                         if (!bgid) bgid = _show(showID).media().add(obj.newData)
 
                         // let layoutSlide = _show(showIDs).layouts([obj.location!.layout!]).slides([ref.index]).get()[0]
@@ -159,13 +153,6 @@ export function history(obj: History, shouldUndo: null | boolean = null) {
                             .set({ key: "audio", value: audio })
                     }
                 } else {
-                    // WIP add audio at index
-                    // let cloudId = get(driveData).mediaId
-                    // if (audio[0] && cloudId && cloudId !== "default") {
-                    //     _show(showID).media().add(obj.newData)
-                    //     audioId = audio[0]
-                    //     _show(showID).media().add(obj.newData)
-                    // }
                     if (!audioId) audioId = _show(showID).media().add(obj.newData)
 
                     if (!audio.includes(audioId)) {
@@ -220,12 +207,7 @@ export function history(obj: History, shouldUndo: null | boolean = null) {
         undoHistory.update((uh: any) => {
             // if id and location is equal push new data to previous stored
             // not: project | newProject | newFolder | addShowToProject | slide
-            if (
-                shouldUndo === null &&
-                (override.includes(obj.id) || obj.location?.override) &&
-                uh[uh.length - 1]?.id === obj.id &&
-                JSON.stringify(Object.values(uh[uh.length - 1]?.location || {})) === JSON.stringify(Object.values(obj.location || {}))
-            ) {
+            if (shouldUndo === null && (override.includes(obj.id) || obj.location?.override) && uh[uh.length - 1]?.id === obj.id && JSON.stringify(Object.values(uh[uh.length - 1]?.location || {})) === JSON.stringify(Object.values(obj.location || {}))) {
                 // override, but keep previousData!!!
                 const newestData = obj.newData
                 if (newestData?.previousData) newestData.previousData = uh[uh.length - 1].newData.previousData
@@ -251,6 +233,8 @@ export function history(obj: History, shouldUndo: null | boolean = null) {
         deselect()
     }
 
+    if (!get(isDev)) return
+
     console.info("UNDO: ", [...get(undoHistory)])
     console.info("REDO: ", [...get(redoHistory)])
 }
@@ -271,7 +255,7 @@ export function historyNew(type: HistoryTypes, value: any) {
     const historyValue: HistoryNew = { version: 1, time: Date.now(), type, value }
     undoHistory.update((a) => {
         a.push(historyValue)
-        return a
+        return a.slice(-get(historyCacheCount))
     })
 }
 
@@ -297,7 +281,7 @@ export const undo = () => {
 
         redoHistory.update((rh) => {
             rh.push(lastUndo)
-            return rh
+            return rh.slice(-get(historyCacheCount))
         })
         return
     }
@@ -306,7 +290,7 @@ export const undo = () => {
     lastUndo!.oldData = clone(lastUndo!.newData)
     lastUndo!.newData = oldData
 
-    console.info("UNDO", [...get(undoHistory)], [...get(redoHistory)])
+    if (get(isDev)) console.info("UNDO", [...get(undoHistory)], [...get(redoHistory)])
 
     history(lastUndo!, true)
 }
@@ -335,7 +319,7 @@ export const redo = () => {
             // a[a.length - 1].time = Date.now()
             lastRedo.time = Date.now()
             a.push(lastRedo)
-            return a
+            return a.slice(-get(historyCacheCount))
         })
         return
     }
@@ -344,7 +328,7 @@ export const redo = () => {
     lastRedo!.oldData = clone(lastRedo!.newData)
     lastRedo!.newData = oldData
 
-    console.info("REDO", [...get(undoHistory)], [...get(redoHistory)])
+    if (get(isDev)) console.info("REDO", [...get(undoHistory)], [...get(redoHistory)])
 
     history(lastRedo!, false)
 }

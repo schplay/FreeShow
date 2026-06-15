@@ -12,9 +12,11 @@
     let list: string[] = []
     $: {
         list = []
+        let selectionData = $selected.data
+        if (!Array.isArray(selectionData)) selectionData = []
 
         if (($activeShow && $selected.id === "slide") || $selected.id === "group") {
-            $selected.data.forEach((a, i) => {
+            selectionData.forEach((a, i) => {
                 let slide = a.id ? a : getLayoutRef()[a.index]
                 if (!slide) return
 
@@ -27,20 +29,23 @@
             })
             list = removeDuplicates(list)
         } else if ($selected.id === "chord") {
-            groupName = $selected.data?.[0]?.chord?.key || ""
+            groupName = selectionData[0]?.chord?.key || ""
         } else if ($selected.id === "bible_book") {
             const scriptureId = $drawerTabsData.scripture?.activeSubTab || ""
             const activeBible = $scripturesCache[scriptureId]
-            const bookIndex = $selected.data[0]?.index - 1
+            const bookIndex = selectionData[0]?.index - 1
             const book = activeBible.books?.[bookIndex] || {}
             groupName = (book as any).customName || book.name || ""
-        } else if ($selected.data?.[0]?.name) {
-            groupName = $selected.data[0].name
+        } else if (selectionData[0]?.name) {
+            groupName = selectionData[0].name
         }
     }
 
     const renameAction = {
         slide: () => {
+            const showId = $activeShow?.id
+            if (!showId) return
+
             const ref = getLayoutRef()
 
             // get selected ids
@@ -56,7 +61,7 @@
             // remove children if parent is selected
             ids.map((id) => {
                 const slide = _show().slides([id]).get()[0]
-                if (slide.children?.length) ids = ids.filter((id) => !slide.children.includes(id))
+                if (slide?.children?.length) ids = ids.filter((id) => !slide.children.includes(id))
             })
 
             // get slide refs
@@ -75,10 +80,9 @@
                 const slideId = ref.id
 
                 // remove global group if active
-                if ($activeShow && $showsCache[$activeShow.id].slides[slideId].globalGroup)
-                    history({ id: "UPDATE", newData: { data: null, key: "slides", keys: [slideId], subkey: "globalGroup" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
+                if ($activeShow && $showsCache[showId].slides[slideId].globalGroup) history({ id: "UPDATE", newData: { data: null, key: "slides", keys: [slideId], subkey: "globalGroup" }, oldData: { id: showId }, location: { page: "show", id: "show_key" } })
 
-                history({ id: "UPDATE", newData: { data: groupName, key: "slides", keys: [slideId], subkey: "group" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
+                history({ id: "UPDATE", newData: { data: groupName, key: "slides", keys: [slideId], subkey: "group" }, oldData: { id: showId }, location: { page: "show", id: "show_key" } })
 
                 if (!ref?.parent) return
                 // make child a parent
@@ -90,12 +94,12 @@
                 history({
                     id: "UPDATE",
                     newData: { data: children.filter((a: string) => a !== ref.id), key: "slides", keys: [ref.parent.id], subkey: "children" },
-                    oldData: { id: $activeShow?.id },
+                    oldData: { id: showId },
                     location: { page: "show", id: "show_key" }
                 })
 
                 let currentLayouts: SlideData[][] = _show().layouts().get("slides")
-                let layoutIds: string[] = Object.keys($showsCache[$activeShow!.id].layouts)
+                let layoutIds: string[] = Object.keys($showsCache[showId].layouts)
                 let newLayouts: { [key: string]: SlideData[] } = {}
 
                 currentLayouts.forEach((layout, i: number) => {
@@ -115,7 +119,7 @@
                 })
 
                 // set updated layout slides
-                history({ id: "UPDATE", newData: { key: "layouts", keys: layoutIds, subkey: "slides", data: newLayouts }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
+                history({ id: "UPDATE", newData: { key: "layouts", keys: layoutIds, subkey: "slides", data: newLayouts }, oldData: { id: showId }, location: { page: "show", id: "show_key" } })
             })
         },
         group: () => {
@@ -123,8 +127,7 @@
                 const slideId = a.id
 
                 // remove global group if active
-                if ($activeShow && $showsCache[$activeShow.id].slides[slideId].globalGroup)
-                    history({ id: "UPDATE", newData: { data: null, key: "slides", keys: [slideId], subkey: "globalGroup" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
+                if ($activeShow && $showsCache[$activeShow.id].slides[slideId].globalGroup) history({ id: "UPDATE", newData: { data: null, key: "slides", keys: [slideId], subkey: "globalGroup" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
 
                 history({ id: "UPDATE", newData: { data: groupName, key: "slides", keys: [slideId], subkey: "group" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
             })
@@ -138,7 +141,8 @@
 
             let newLines = clone(lines)
             let chords = newLines[chord.index].chords
-            chords?.forEach((a, i: number) => {
+            if (!Array.isArray(chords)) chords = []
+            chords.forEach((a, i: number) => {
                 if (a.id === chord.chord.id) newLines[chord.index].chords![i].key = groupName
             })
 
@@ -175,7 +179,7 @@
     }
 
     function rename() {
-        if ($selected.id) renameAction[$selected.id]()
+        if ($selected.id && renameAction[$selected.id]) renameAction[$selected.id]()
         activePopup.set(null)
         groupName = ""
         selected.set({ id: null, data: [] })

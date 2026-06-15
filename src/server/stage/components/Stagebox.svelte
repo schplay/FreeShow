@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onDestroy } from "svelte"
     import type { StageLayout } from "../../../types/Stage"
     import Center from "../../common/components/Center.svelte"
     import Icon from "../../common/components/Icon.svelte"
@@ -10,7 +11,7 @@
     import SlideProgress from "../items/SlideProgress.svelte"
     import SlideText from "../items/SlideText.svelte"
     import VideoTime from "../items/VideoTime.svelte"
-    import { activeTimers, background, output, outputSlideCache, progressData, stream, timers, variables } from "../util/stores"
+    import { activeTimers, background, media, output, outputSlideCache, progressData, stream, timers, variables } from "../util/stores"
     import MediaOutput from "./MediaOutput.svelte"
     import PreviewCanvas from "./PreviewCanvas.svelte"
     import Textbox from "./Textbox.svelte"
@@ -28,7 +29,8 @@
 
     // timer
     let today = new Date()
-    setInterval(() => (today = new Date()), 1000)
+    const dateInterval = setInterval(() => (today = new Date()), 1000)
+    onDestroy(() => clearInterval(dateInterval))
 
     let itemStyles: any = getStyles(item.style, true)
     $: fontSize = Number(itemStyles?.["font-size"] || 0) || 100 // item.autoFontSize ||
@@ -88,13 +90,18 @@
     function updateStyles() {
         const styles = getStyles(style)
         const textStyleKeys = ["line-height", "text-decoration"]
+        // For slide_text items with autosize, exclude font-size from container style
+        // to prevent CSS inheritance of 800px (MAX_FONT_SIZE) before autosize computes correct value
+        const isSlideTextWithAutosize = item?.type === "slide_text" && (item?.auto !== false || (item?.textFit && item?.textFit !== "none"))
 
         itemStyle = ""
         textStyle = ""
 
         Object.entries(styles).forEach(([key, value]) => {
             if (textStyleKeys.includes(key)) textStyle += `${key}: ${value};`
-            else itemStyle += `${key}: ${value};`
+            else if (key === "font-size" && isSlideTextWithAutosize) {
+                // Skip font-size for autosize items - let Textbox's autosize compute it
+            } else itemStyle += `${key}: ${value};`
         })
     }
 
@@ -104,12 +111,7 @@
 
 <!-- style + (id.includes("current_output") ? "" : newSizes) -->
 <!-- {show.settings.autoStretch === false ? '' : newSizes} -->
-<div
-    class="item"
-    class:border={stageLayout?.settings.labels}
-    class:isDisabledVariable
-    style="{itemStyle}{id.includes('slide') && !id.includes('tracker') ? '' : textStyle}{newSizes}--labelColor: {stageLayout?.settings?.labelColor || '#d0a853'};{fixedWidth}"
->
+<div class="item" class:border={stageLayout?.settings.labels} class:isDisabledVariable style="{itemStyle}{id.includes('slide') && !id.includes('tracker') ? '' : textStyle}{newSizes}--labelColor: {stageLayout?.settings?.labelColor || '#d0a853'};{fixedWidth}">
     {#if stageLayout?.settings.labels}
         <div class="label">{item.label || ""}</div>
     {/if}
@@ -129,19 +131,7 @@
                 {#if currentSlide}
                     {#key item || currentSlide}
                         <!-- autoStage={show.settings.autoStretch !== false} -->
-                        <SlideText
-                            {currentSlide}
-                            {slideOffset}
-                            stageItem={item}
-                            show={stageLayout}
-                            {resolution}
-                            chords={typeof item.chords === "boolean" ? item.chords : item.chords?.enabled}
-                            autoSize={item.auto !== false}
-                            {fontSize}
-                            autoStage
-                            {textStyle}
-                            style={item.type ? item.keepStyle : false}
-                        />
+                        <SlideText {currentSlide} {slideOffset} stageItem={item} show={stageLayout} {resolution} chords={typeof item.chords === "boolean" ? item.chords : item.chords?.enabled} autoSize={item.auto !== false} {fontSize} autoStage {textStyle} style={item.type ? item.keepStyle : false} />
                     {/key}
                 {/if}
             {:else if item.type === "slide_notes" || id.includes("notes")}
@@ -155,7 +145,9 @@
                 <Clock autoSize={item.auto !== false ? autoSize : fontSize} style={false} {...item.clock} />
             {:else if item.type === "timer"}
                 <Timer {item} id={item.timer?.id || item.timerId || firstTimerId || ""} {today} style={item.auto === false ? "" : `font-size: ${item.auto !== false ? autoSize : fontSize}px;`} />
-            {:else if item.type === "media" || item.type === "camera"}
+            {:else if item.type === "media"}
+                <MediaOutput path={$media[item.src] || item.src} />
+            {:else if item.type === "camera"}
                 <Center faded>
                     <Icon id="noImage" size={8} white />
                 </Center>
@@ -252,5 +244,18 @@
     }
     .align :global(.item .align .lines) {
         text-align: var(--text-align);
+    }
+
+    /* phone view */
+    @media (max-width: 1000px) {
+        .label {
+            font-size: 24px;
+        }
+    }
+
+    @media (max-width: 500px) {
+        .label {
+            font-size: 18px;
+        }
     }
 </style>

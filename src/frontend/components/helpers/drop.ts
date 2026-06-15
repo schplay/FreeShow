@@ -15,7 +15,7 @@ export type DropAreas = "all_slides" | "slides" | "slide" | "edit" | "shows" | "
 
 const areas = {
     all_slides: ["template"],
-    slides: ["media", "audio", "audio_effect", "overlay", "sound", "effect", "screen", "ndi", "camera", "microphone", "scripture", "trigger", "category_audio", "audio_stream", "metronome", "show", "global_timer", "variable", "midi", "action"], // group
+    slides: ["media", "audio", "audio_effect", "overlay", "sound", "effect", "screen", "ndi", "camera", "microphone", "scripture", "category_audio", "audio_stream", "metronome", "show", "global_timer", "variable", "midi", "action"], // group
     // slide: ["overlay", "sound", "camera"], // "media",
     // projects: ["folder"],
     project: ["show_drawer", "media", "audio", "audio_effect", "overlay", "player", "scripture", "effect", "screen", "ndi", "camera"],
@@ -61,12 +61,12 @@ export async function ondrop(e: any, id: string) {
     console.info("DRAG: ", sel)
     console.info("DROP: ", dropdata)
 
-    const keys = { shiftKey: e?.shiftKey }
+    const keys = { shiftKey: e?.shiftKey, ctrlKey: e?.ctrlKey || e?.metaKey, altKey: e?.altKey }
 
     if (dropActions[id]) {
         const dropData = { drag: sel, drop: dropdata }
 
-        const hist = await dropActions[id](dropData, h, keys) as History | undefined
+        const hist = (await dropActions[id](dropData, h, keys)) as History | undefined
         if (hist && hist.id) history(hist)
         deselect()
         return

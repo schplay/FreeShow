@@ -8,7 +8,7 @@
     import { newToast, wait } from "../../../utils/common"
     import { translateText } from "../../../utils/language"
     import Icon from "../../helpers/Icon.svelte"
-    import { getFileName, removeExtension } from "../../helpers/media"
+    import { encodeFilePath, getFileName, removeExtension } from "../../helpers/media"
     import { getActiveOutputs, setOutput, startFolderTimer } from "../../helpers/output"
     import T from "../../helpers/T.svelte"
     import FloatingInputs from "../../input/FloatingInputs.svelte"
@@ -23,7 +23,7 @@
     let data: { timer?: number } | undefined
     $: data = $projects[$activeProject || ""]?.shows?.[index]?.data
 
-    $: path = show.id
+    $: path = encodeFilePath(show.id)
 
     $: activeOutput = getActiveOutputs($outputs, false, true, true)[0]
 
@@ -71,6 +71,7 @@
     }
 
     function getId(text: string) {
+        if (typeof text !== "string") return ""
         return text.replace(/[^a-zA-Z0-9]+/g, "")
     }
 
@@ -84,42 +85,90 @@
 
     let loading = true
     let loadingTask: PDFDocumentLoadingTask | null = null
+    let renderTasks: any[] = []
+    let currentPath = ""
+
+    const workerErrors = ["RenderingCancelledException", "Transport destroyed", "Worker was destroyed", "Worker was terminated", "sendWithPromise"]
+    const isWorkerError = (error: any) => error?.name === "RenderingCancelledException" || workerErrors.some((msg) => error?.message?.includes(msg))
+
     onMount(loadPages)
-    onDestroy(() => loadingTask?.destroy())
+    onDestroy(() => {
+        renderTasks.forEach((task) => task?.cancel())
+        try {
+            loadingTask?.destroy()
+        } catch {}
+    })
+
     async function loadPages() {
         loading = true
+        renderTasks.forEach((task) => task?.cancel())
+        renderTasks = []
+
+        if (loadingTask) {
+            try {
+                loadingTask.destroy()
+            } catch {}
+            loadingTask = null
+            await wait(50)
+        }
+
         if (!path) {
             loading = false
             return
         }
 
-        loadingTask = getDocument(path)
-        const pdfDoc = await loadingTask.promise
-        pageCount = pdfDoc.numPages
+        const loadPath = path
+        currentPath = path
 
-        // Wait for canvases to bind
-        await wait(10)
+        try {
+            loadingTask = getDocument(path)
+            const pdfDoc = await loadingTask.promise
+            if (currentPath !== loadPath) return
 
-        for (let i = 0; i < pageCount; i++) {
-            const page = await pdfDoc.getPage(i + 1)
-            const viewport = page.getViewport({ scale: 1.5 })
-            const canvas = canvases[i]
-            const context = canvas?.getContext("2d")
-            if (!context) break
+            pageCount = pdfDoc.numPages
+            await wait(10)
 
-            canvas!.height = viewport.height
-            canvas!.width = viewport.width
+            for (let i = 0; i < pageCount; i++) {
+                if (currentPath !== loadPath) return
 
-            await page.render({ canvas: canvas!, canvasContext: context, viewport }).promise
+                try {
+                    const page = await pdfDoc.getPage(i + 1)
+                    if (currentPath !== loadPath) return
 
-            // display when the first page has loaded
+                    const viewport = page.getViewport({ scale: 1.5 })
+                    const canvas = canvases[i]
+                    const context = canvas?.getContext("2d")
+                    if (!context) break
+
+                    canvas!.height = viewport.height
+                    canvas!.width = viewport.width
+
+                    const renderTask = page.render({ canvas: canvas!, canvasContext: context, viewport })
+                    renderTasks[i] = renderTask
+
+                    try {
+                        await renderTask.promise
+                    } catch (error: any) {
+                        if (error?.name === "RenderingCancelledException") continue
+                        throw error
+                    }
+
+                    // display when the first page has loaded
+                    loading = false
+                } catch (error: any) {
+                    if (isWorkerError(error)) return
+                    throw error
+                }
+            }
+        } catch (error: any) {
+            if (!isWorkerError(error)) console.error("PDF loading error:", error)
             loading = false
         }
     }
 
     function convertToImages() {
         newToast("actions.converting")
-        sendMain(Main.PDF_TO_IMAGE, { filePath: path })
+        sendMain(Main.PDF_TO_IMAGE, { filePath: show.id })
     }
 
     $: timer = data?.timer || 0

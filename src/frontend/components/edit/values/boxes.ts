@@ -37,7 +37,7 @@ export function setBoxInputValue(box: BoxContent2 | { [key: string]: EditBoxSect
     if (!newBox?.[sectionId]) return
 
     const inputs = newBox[sectionId].inputs.flat()
-    const keyIndex = inputs.findIndex((a) => (a.key === inputId || a.id === inputId))
+    const keyIndex = inputs.findIndex((a) => a.key === inputId || a.id === inputId)
     if (keyIndex < 0) return
 
     if (key === "values") {
@@ -114,23 +114,17 @@ export const filterSection = splitIntoRows([
 
 ///
 
-const alignX =
-    [
-        { id: "style", key: "text-align", type: "radio", value: "left", values: { label: "edit._title_left", icon: "alignLeft" } },
-        { id: "style", key: "text-align", type: "radio", value: "center", values: { label: "edit._title_center", icon: "alignCenter" } },
-        { id: "style", key: "text-align", type: "radio", value: "right", values: { label: "edit._title_right", icon: "alignRight" } },
-    ]
-const alignTextX =
-    [
-        ...alignX,
-        { id: "style", key: "text-align", type: "radio", value: "justify", values: { label: "edit._title_justify", icon: "alignJustify" } }
-    ]
-const alignY =
-    [
-        { id: "style", key: "align-items", type: "radio", value: "flex-start", values: { label: "edit.align_start", icon: "alignTop" } },
-        { id: "style", key: "align-items", type: "radio", value: "center", values: { label: "edit.align_center", icon: "alignMiddle" } },
-        { id: "style", key: "align-items", type: "radio", value: "flex-end", values: { label: "edit.align_end", icon: "alignBottom" } }
-    ]
+const alignX = [
+    { id: "style", key: "text-align", type: "radio", value: "left", values: { label: "edit._title_left", icon: "alignLeft" } },
+    { id: "style", key: "text-align", type: "radio", value: "center", values: { label: "edit._title_center", icon: "alignCenter" } },
+    { id: "style", key: "text-align", type: "radio", value: "right", values: { label: "edit._title_right", icon: "alignRight" } }
+]
+const alignTextX = [...alignX, { id: "style", key: "text-align", type: "radio", value: "justify", values: { label: "edit._title_justify", icon: "alignJustify" } }]
+const alignY = [
+    { id: "style", key: "align-items", type: "radio", value: "flex-start", values: { label: "edit.align_start", icon: "alignTop" } },
+    { id: "style", key: "align-items", type: "radio", value: "center", values: { label: "edit.align_center", icon: "alignMiddle" } },
+    { id: "style", key: "align-items", type: "radio", value: "flex-end", values: { label: "edit.align_end", icon: "alignBottom" } }
+]
 
 export const textSections: { [key: string]: EditBoxSection } = {
     default: {
@@ -142,7 +136,7 @@ export const textSections: { [key: string]: EditBoxSection } = {
                 { id: "style", key: "color", type: "color", value: "#FFFFFF", values: { label: "edit.text_color", allowGradients: true, allowOpacity: true, noLabel: true, style: "flex: 1;" } }
             ],
             [
-                { id: "style", key: "font-size", type: "number", value: 100, extension: "px", values: { label: "edit.font_size", style: "flex: 1;" } },
+                { id: "style", key: "font-size", type: "number", value: 100, extension: "px", values: { label: "edit.font_size", style: "flex: 1;", step: 2 } },
                 {
                     id: "textFit",
                     type: "dropdown",
@@ -169,7 +163,7 @@ export const textSections: { [key: string]: EditBoxSection } = {
     },
     align: {
         defaultValues: ["center", "center"],
-        inputs: [alignTextX, alignY],
+        inputs: [alignTextX, alignY]
     },
     text: {
         inputs: [
@@ -255,7 +249,7 @@ export const textSections: { [key: string]: EditBoxSection } = {
     },
     outline: {
         expandAutoValue: {
-            "-webkit-text-stroke-width": 2
+            "-webkit-text-stroke-width": 10
         },
         inputs: [
             [
@@ -314,7 +308,8 @@ export const textSections: { [key: string]: EditBoxSection } = {
                     }
                 }
             ],
-            [{ id: "scrolling.speed", type: "number", value: 30, values: { label: "edit.scrolling_speed", min: 1, max: 100 } }]
+            [{ id: "scrolling.speed", type: "number", value: 30, values: { label: "edit.scrolling_speed (s)", min: 1, max: 500 } }],
+            [{ id: "scrolling.gap", type: "number", value: 100, values: { label: "edit.gap", min: -100, max: 2000 } }]
         ]
     },
     special: {
@@ -326,6 +321,12 @@ export const textSections: { [key: string]: EditBoxSection } = {
     }
 }
 
+const croppingRowsPercentage = splitIntoRows([
+    { id: "cropping.top", type: "number", value: 0, values: { label: "screen.top (%)", max: 100, showSlider: true } },
+    { id: "cropping.right", type: "number", value: 0, values: { label: "screen.right (%)", max: 100, showSlider: true } },
+    { id: "cropping.bottom", type: "number", value: 0, values: { label: "screen.bottom (%)", max: 100, showSlider: true } },
+    { id: "cropping.left", type: "number", value: 0, values: { label: "screen.left (%)", max: 100, showSlider: true } }
+])
 const mediaSections: { [key: string]: EditBoxSection } = {
     default: {
         inputs: splitIntoRows([
@@ -337,20 +338,20 @@ const mediaSections: { [key: string]: EditBoxSection } = {
             { id: "speed", type: "number", value: 1, values: { label: "media.speed", defaultValue: 1, step: 0.1, min: 0.1, max: 15, showSlider: true } },
             { id: "flipped", type: "checkbox", value: false, values: { label: "media.flip_horizontally" } },
             { id: "flippedY", type: "checkbox", value: false, values: { label: "media.flip_vertically" } }
-            // WIP crop image
-            // object-position: 20px 20px;
-            // transform: scale(1.2) translate(0, 5%);
         ])
+    },
+    cropping: {
+        inputs: croppingRowsPercentage
     },
     filters: {
         inputs: filterSection
-    },
+    }
 }
 
 ///
 
 export function splitIntoRows(inputs: EditInput2[]) {
-    return inputs.map(a => ([a]))
+    return inputs.map((a) => [a])
 }
 
 function eventText(defaultSection: any) {
@@ -364,7 +365,7 @@ function eventText(defaultSection: any) {
         lines: textSections.lines,
         outline: textSections.outline,
         shadow: textSections.shadow,
-        CSS: textSections.CSS,
+        CSS: textSections.CSS
     })
 }
 
@@ -384,7 +385,7 @@ function nonTextboxTextStyle(defaultSection: EditBoxSection) {
         text: { inputs: [[letterSpacing]] },
         outline: textSections.outline,
         shadow: textSections.shadow,
-        CSS: textSections.CSS,
+        CSS: textSections.CSS
     })
 }
 
@@ -430,16 +431,16 @@ export const itemBoxes: Box2 = {
                             ]
                         }
                     },
-                    { id: "timer.circleMask", type: "checkbox", value: false, values: { label: "timer.mask", } },
-                    { id: "timer.showHours", type: "checkbox", value: true, values: { label: "timer.hours", } }
+                    { id: "timer.circleMask", type: "checkbox", value: false, values: { label: "timer.mask" } },
+                    { id: "timer.showHours", type: "checkbox", value: true, values: { label: "timer.hours" } }
                 ])
-            }),
+            })
         }
     },
     clock: {
         icon: "clock",
         sections: {
-            ...(nonTextboxTextStyle({
+            ...nonTextboxTextStyle({
                 inputs: splitIntoRows([
                     {
                         id: "clock.type",
@@ -476,7 +477,7 @@ export const itemBoxes: Box2 = {
                         type: "checkbox",
                         value: true,
                         values: {
-                            label: "clock.show_time",
+                            label: "clock.show_time"
                         },
                         hidden: true
                     },
@@ -485,7 +486,7 @@ export const itemBoxes: Box2 = {
                         type: "checkbox",
                         value: false,
                         values: {
-                            label: "clock.seconds",
+                            label: "clock.seconds"
                         },
                         hidden: true
                     },
@@ -498,8 +499,8 @@ export const itemBoxes: Box2 = {
                             label: "actions.format",
                             title: "Day: {DD}, Month: {MM}, Full year: {YYYY}, Hours: {hh}, Minutes: {mm}, Seconds: {ss}, AM/PM: {A}, Full date: {LLL}", // similar to getProjectName()
                             defaultValue: "hh:mm a",
-                            placeholder: "E.g.: LT, LLLL, MMMM D YYYY h:mm A",
-                        },
+                            placeholder: "E.g.: LT, LLLL, MMMM D YYYY h:mm A"
+                        }
                     },
                     {
                         id: "tip",
@@ -508,10 +509,11 @@ export const itemBoxes: Box2 = {
                         value: "",
                         values: {
                             label: "",
-                            subtext: '<a href="https://day.js.org/docs/en/display/format#list-of-all-available-formats" class="open">List of day.js formats</a>',
-                        },
-                    }])
-            }))
+                            subtext: '<a href="https://day.js.org/docs/en/display/format#list-of-all-available-formats" class="open">List of day.js formats</a>'
+                        }
+                    }
+                ])
+            })
         }
     },
     camera: {
@@ -530,75 +532,74 @@ export const itemBoxes: Box2 = {
     slide_tracker: {
         icon: "percentage",
         sections: {
-            ...(nonTextboxTextStyle({
-                inputs: [[
-                    {
-                        id: "tracker.type",
-                        type: "dropdown",
-                        value: "number",
-                        values: {
-                            label: "clock.type",
-                            options: [
-                                { value: "number", label: "variables.number" },
-                                { value: "bar", label: "edit.progress_bar" },
-                                { value: "group", label: "tools.groups" }
-                            ],
-                            style: "flex: 4;"
+            ...nonTextboxTextStyle({
+                inputs: [
+                    [
+                        {
+                            id: "tracker.type",
+                            type: "dropdown",
+                            value: "number",
+                            values: {
+                                label: "clock.type",
+                                options: [
+                                    { value: "number", label: "variables.number" },
+                                    { value: "bar", label: "edit.progress_bar" },
+                                    { value: "group", label: "tools.groups" },
+                                    { value: "project", label: "formats.project" }
+                                ],
+                                style: "flex: 4;"
+                            }
+                        },
+                        {
+                            id: "tracker.accent",
+                            type: "color",
+                            value: "#F0008C",
+                            values: {
+                                label: "edit.accent_color",
+                                allowEmpty: true,
+                                noLabel: true,
+                                style: "flex: 1;"
+                            }
                         }
-                    },
-                    {
-                        id: "tracker.accent",
-                        type: "color",
-                        value: "#F0008C",
-                        values: {
-                            label: "edit.accent_color",
-                            allowEmpty: true,
-                            noLabel: true,
-                            style: "flex: 1;"
-                        }
-                    },
-                ], [
-                    { type: "checkbox", id: "tracker.childProgress", value: false, values: { label: "edit.sub_indexes" } },
-                ], [
-                    { type: "checkbox", id: "tracker.oneLetter", value: false, values: { label: "edit.one_letter" } }
-                ]]
-            }))
+                    ],
+                    [{ type: "checkbox", id: "tracker.childProgress", value: false, values: { label: "edit.sub_indexes" } }],
+                    [{ type: "checkbox", id: "tracker.oneLetter", value: false, values: { label: "edit.one_letter" } }],
+                    [{ id: "tracker.projectMetadata", type: "dropdown", value: "name", values: { label: "tools.metadata", options: [{ value: "name", label: "show.name" }] } }]
+                ]
+            })
         }
     },
     events: {
         icon: "calendar",
         sections: {
             ...eventText({
-                inputs: [[
-                    { id: "events.maxEvents", type: "number", value: 5, values: { label: "edit.max_events", max: 20 } },
-                ], [
-                    { id: "events.startDaysFromToday", type: "number", value: 0, values: { label: "edit.start_days_from_today", max: 10000 } },
-                ], [
-                    { id: "events.justOneDay", type: "checkbox", value: false, values: { label: "edit.just_one_day" } },
-                ], [
-                    { id: "events.enableStartDate", type: "checkbox", value: false, values: { label: "edit.enable_start_date" } },
-                ], [
-                    { id: "events.startDate", type: "date", hidden: true, value: "", values: { label: "calendar.from_date" } },
-                    { id: "events.startTime", type: "time", hidden: true, value: "", values: { label: "calendar.from_time" } }
-                ]]
-            }),
+                inputs: [
+                    [{ id: "events.maxEvents", type: "number", value: 5, values: { label: "edit.max_events", max: 20 } }],
+                    [{ id: "events.startDaysFromToday", type: "number", value: 0, values: { label: "edit.start_days_from_today", max: 10000 } }],
+                    [{ id: "events.justOneDay", type: "checkbox", value: false, values: { label: "edit.just_one_day" } }],
+                    [{ id: "events.enableStartDate", type: "checkbox", value: false, values: { label: "edit.enable_start_date" } }],
+                    [
+                        { id: "events.startDate", type: "date", hidden: true, value: "", values: { label: "calendar.from_date" } },
+                        { id: "events.startTime", type: "time", hidden: true, value: "", values: { label: "calendar.from_time" } }
+                    ]
+                ]
+            })
         }
     },
     weather: {
         icon: "cloud",
         sections: {
             default: {
-                inputs: [[
-                    { id: "weather.size", type: "number", value: 100, values: { label: "edit.size", min: 0, max: 200 } },
-                ], [
-                    { id: "weather.latitude", type: "number", value: 0, values: { label: "edit.latitude", min: -90, max: 90 } },
-                    { id: "weather.longitude", type: "number", value: 0, values: { label: "edit.longitude", min: -180, max: 180 } },
-                    // {  id: "weather.altitude", type: "number", value: 0, values: { label: "edit.altitude", max: 5000 } },
-                ], [
-                    { id: "weather.useFahrenheit", type: "checkbox", value: false, values: { label: "edit.fahrenheit", } },
-                ], [
-                    { id: "weather.longRange", type: "checkbox", value: false, values: { label: "edit.longRange", } }
-                ]]
+                inputs: [
+                    [{ id: "weather.size", type: "number", value: 100, values: { label: "edit.size", min: 0, max: 200 } }],
+                    [
+                        { id: "weather.latitude", type: "number", value: 0, values: { label: "edit.latitude", min: -90, max: 90 } },
+                        { id: "weather.longitude", type: "number", value: 0, values: { label: "edit.longitude", min: -180, max: 180 } }
+                        // {  id: "weather.altitude", type: "number", value: 0, values: { label: "edit.altitude", max: 5000 } },
+                    ],
+                    [{ id: "weather.useFahrenheit", type: "checkbox", value: false, values: { label: "edit.fahrenheit" } }],
+                    [{ id: "weather.longRange", type: "checkbox", value: false, values: { label: "edit.longRange" } }]
+                ]
             }
         }
     },
@@ -606,10 +607,12 @@ export const itemBoxes: Box2 = {
         icon: "visualizer",
         sections: {
             default: {
-                inputs: [[
-                    { id: "visualizer.padding", type: "number", value: 0, values: { label: "edit.padding", style: "flex: 4;" } },
-                    { id: "visualizer.color", type: "color", value: "", values: { label: "edit.color", allowEmpty: true, allowOpacity: true, noLabel: true, style: "flex: 1;" } },
-                ]]
+                inputs: [
+                    [
+                        { id: "visualizer.padding", type: "number", value: 0, values: { label: "edit.padding", style: "flex: 4;" } },
+                        { id: "visualizer.color", type: "color", value: "", values: { label: "edit.color", allowEmpty: true, allowOpacity: true, noLabel: true, style: "flex: 1;" } }
+                    ]
+                ]
             }
         }
     },
@@ -618,10 +621,11 @@ export const itemBoxes: Box2 = {
         sections: {
             default: {
                 inputs: splitIntoRows([
-                    { id: "captions.language", type: "dropdown", value: "en-US", values: { label: "captions.language", options: captionLanguages.map(a => ({ value: a.id, label: a.name })) } },
-                    // this is very limited
-                    // { id: "captions.translate", type: "dropdown", value: "en-US", values: { label: "captions.translate", options: captionTranslateLanguages } },
+                    { id: "captions.language", type: "dropdown", value: "en-US", values: { label: "captions.language", options: captionLanguages.map((a) => ({ value: a.id, label: a.name })) } },
+                    { id: "captions.translate", type: "dropdown", value: "", values: { label: "captions.translate", options: "captionTranslateLanguages" } },
+                    { id: "captions.googlekey", type: "string", value: "", values: { label: "Google Translate API Key", placeholder: "Optional: for 100+ languages" } },
                     { id: "captions.showtime", type: "number", value: 5, values: { label: "captions.showtime", min: 1, max: 60 } },
+                    { id: "captions.roomId", type: "string", value: "", values: { label: "Room ID", placeholder: "empty = automatic" } },
                     { id: "", type: "tip", value: "", values: { label: "captions.powered_by", subtext: "CAPTION.Ninja" } }
                 ])
             },
@@ -647,7 +651,10 @@ export const itemBoxes: Box2 = {
     icon: {
         icon: "star",
         sections: {
-            default: { inputs: [[{ id: "style", key: "color", type: "color", value: "#FFFFFF", values: { label: "edit.color", allowOpacity: true } }]] }
+            default: { inputs: [[{ id: "style", key: "color", type: "color", value: "", values: { label: "edit.color", allowOpacity: true, allowEmpty: true } }]] },
+            special: {
+                inputs: [[{ id: "button.press", type: "dropdown", value: "", values: { label: "edit.press_action", options: "actions", allowEmpty: true } }], [{ id: "button.release", type: "dropdown", value: "", values: { label: "edit.release_action", options: "actions", allowEmpty: true } }]]
+            }
         }
     }
 }

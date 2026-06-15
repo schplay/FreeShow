@@ -12,6 +12,11 @@ files:
     - build/types/**
     - public/**
     - "!node_modules/@napi-rs"
+    - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,test,tests}"
+    - "!**/node_modules/*/{*.d.ts,*.ts,*.map}"
+    - "!**/node_modules/{@types,typescript}/**"
+    - "!**/node_modules/**/*.pdb"
+    - "!**/node_modules/**/obj/**"
 
 extraResources:
     - from: node_modules/slideshow/
@@ -24,6 +29,9 @@ extraResources:
 win:
     target: NSIS
     icon: build/public/icon.png
+    asarUnpack:
+        - "**/node_modules/macadam/**/*.node"
+        - "**/node_modules/libspotifyctl/**/*"
     azureSignOptions:
         publisherName: Live Church Solutions
         endpoint: https://wus2.codesigning.azure.net/
@@ -34,7 +42,9 @@ win:
 
 linux:
     asarUnpack:
-        - node_modules/grandiose/**
+        - "**/node_modules/grandiose/**"
+        - "**/node_modules/macadam/**/*.node"
+        - "**/node_modules/libltc-wrapper/**/*"
     category: AudioVideo
     target:
         - AppImage
@@ -42,10 +52,18 @@ linux:
         - rpm
     icon: build/public
 
+deb:
+    depends:
+        - libfontconfig1
+        - uuid-runtime
+        - libltc11
+
 # macos
 
 mac:
     icon: build/public/icon.png
+    asarUnpack:
+        - "**/node_modules/macadam/**/*.node"
     target:
         - target: dmg
           arch:

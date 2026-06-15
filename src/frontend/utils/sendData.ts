@@ -3,15 +3,20 @@ import { CONTROLLER, REMOTE, STAGE } from "../../types/Channels"
 import type { ClientMessage, Clients } from "../../types/Socket"
 import { API_ACTIONS } from "../components/actions/api"
 import { checkWindowCapture } from "../components/helpers/output"
-import { connections, currentWindow, shows } from "../stores"
+import { connections, shows } from "../stores"
+import { isMainWindow } from "./common"
 import { receiveCONTROLLER } from "./controllerTalk"
 import { receiveREMOTE } from "./remoteTalk"
 import { receiveSTAGE } from "./stageTalk"
 
 export function filterObjectArray(object: any, keys: string[], filter: null | string = null) {
-    return Object.entries(object)
-        .map(([id, a]: any) => ({ id, ...keys.reduce((o, key) => ({ ...o, [key]: a[key] }), {}) }))
-        .filter((a: any) => (filter ? a[filter] : true))
+    return (
+        Object.entries(object)
+            // sometimes object value can be undefined
+            .filter(([_id, a]: any) => a)
+            .map(([id, a]: any) => ({ id, ...keys.reduce((o, key) => ({ ...o, [key]: a[key] }), {}) }))
+            .filter((a: any) => (filter ? a[filter] : true))
+    )
 }
 export function arrayToObject(array: any[], key = "id") {
     return array.reduce((o, a) => ({ ...o, [a[key]]: a }), {})
@@ -52,7 +57,7 @@ export function setConnectedState(type: string, connectionId: string, key = "act
 // send data to client
 export async function sendData(id: Clients, msg: ClientMessage, check = false) {
     // console.log(id, msg)
-    if (get(currentWindow) !== null) return
+    if (!isMainWindow()) return
 
     let channel = msg.channel
     if (channel.includes("API:")) {
@@ -123,12 +128,12 @@ export function timedout(id: Clients, msg: ClientMessage, run: () => void) {
 // check previous
 const sent: any = { REMOTE: {}, STAGE: {} }
 function checkSent(id: Clients, msg: any): boolean {
-    let match = true
-    if (sent[id][msg.channel] !== JSON.stringify(msg.data)) {
-        sent[id][msg.channel] = JSON.stringify(msg.data)
-        match = false
+    const serialized = JSON.stringify(msg.data)
+    if (sent[id][msg.channel] !== serialized) {
+        sent[id][msg.channel] = serialized
+        return false
     }
-    return match
+    return true
 }
 
 // send data per connection to all

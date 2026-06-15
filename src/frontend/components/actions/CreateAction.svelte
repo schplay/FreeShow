@@ -1,6 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte"
-    import { actionRevealUsed, actions, activePopup, audioPlaylists, audioStreams, categories, effects, emitters, outputs, overlays, popupData, projects, shows, stageShows, styles, templates, timers, triggers, variables } from "../../stores"
+    import { actionRevealUsed, actions, activePopup, audioPlaylists, audioStreams, categories, effects, emitters, obsData, outputs, overlays, popupData, projects, shows, stageShows, styles, templates, timers, variables } from "../../stores"
     import { translateText } from "../../utils/language"
     import { formatSearch } from "../../utils/search"
     import Icon from "../helpers/Icon.svelte"
@@ -21,6 +21,7 @@
     import { actionData } from "./actionData"
     import { getActionTriggerId } from "./actions"
     import { API_ACTIONS } from "./api"
+    import { spotifyState } from "../output/preview/SpotifyManager"
 
     export let list = false
     export let full = false
@@ -52,10 +53,8 @@
         "start_metronome",
         "start_slide_timers",
         "stop_timers",
-        "start_slide_recording",
         "change_output_style",
         "change_stage_output_layout",
-        "start_trigger",
         "send_midi",
         "run_action"
     ]
@@ -70,6 +69,9 @@
     if (mode !== "slide") removeActions.push("start_slide_timers")
 
     let usedSections: string[] = []
+
+    const obsEnabled = !!$obsData.enabled
+    const spotifyEnabled = !!$spotifyState
 
     let previousSection = ""
     $: ACTIONS = [
@@ -94,6 +96,11 @@
                 if (!existingActionsFiltered.find((a) => a.includes("wait")) && actionData[id].incompatible?.find((id) => existingActionsFiltered.includes(id))) return false
                 // don't display GET actions
                 if (id.includes("get_")) return false
+
+                // remove any OBS ones if not enabled
+                if (id.startsWith("obs_") && !obsEnabled) return false
+                // remove any Spotify ones if not active
+                if (id.startsWith("spotify_") && !spotifyEnabled) return false
 
                 // WIP MIDI multiple of the same (needs a new way of setting the id)
                 // show if it has an input (because you probably want to have multiple)
@@ -129,7 +136,8 @@
 
         if (!input) {
             // close popup if no custom inputs
-            activePopup.set(null)
+            // let action update first
+            setTimeout(() => activePopup.set(null), 50)
             return
         }
     }
@@ -157,6 +165,11 @@
     let searchValue = ""
     // let previousSearchValue = ""
     function search(value: string | null = null) {
+        if (value?.length && commonOnly) {
+            commonOnly = false
+            actionRevealUsed.set(true)
+        }
+
         searchValue = formatSearch(value || "")
 
         let actionsList = clone(ACTIONS) //.filter((a) => (commonOnly ? a.common : true))
@@ -190,7 +203,6 @@
         if (id === "start_playlist") return getName($audioPlaylists)
         if (id === "id_select_overlay" || id === "clear_overlay") return getName($overlays)
         if (id === "emit_action") return $emitters[actionValue.emitter]?.name || ""
-        if (id === "start_trigger") return getName($triggers)
         if (id === "run_action" || id === "toggle_action") return getName($actions)
         if (id === "id_start_effect") return getName($effects)
         if (id === "start_show") return getName($shows)
@@ -208,6 +220,7 @@
         if (id.includes("name")) return actionValue.value || ""
         if (id === "change_stage_output_layout") return `${actionValue.outputId ? ($outputs[actionValue.outputId]?.name || "—") + ": " : ""}${$stageShows[actionValue.stageLayoutId]?.name || ""}`
         if (id === "change_output_style") return `${actionValue.outputId ? ($outputs[actionValue.outputId]?.name || "—") + ": " : ""}${actionValue.styleId ? $styles[actionValue.styleId]?.name || "" : translateText("main.none")}`
+        if (id === "set_next_slide_timer") return Number(actionValue.value) + "s"
 
         return ""
     }
@@ -254,12 +267,7 @@
 
                     <!-- disabled={$popupData.existing.includes(action.id)} -->
                     <!-- bold={action.common} -->
-                    <MaterialButton
-                        style="width: 100%;font-weight: normal;justify-content: start;padding: 5px 20px;gap: 12px;{searchValue.length && i === 0 ? 'background-color: var(--primary-lighter);' : ''}"
-                        showOutline={getActionTriggerId(actionId) === action.id}
-                        isActive={(existingActionsFiltered || $popupData.existing || []).map(getActionTriggerId).includes(action.id)}
-                        on:click={() => changeAction({ ...action, index: full ? undefined : 0 })}
-                    >
+                    <MaterialButton style="width: 100%;font-weight: normal;justify-content: start;padding: 5px 20px;gap: 12px;{searchValue.length && i === 0 ? 'background-color: var(--primary-lighter);' : ''}" showOutline={getActionTriggerId(actionId) === action.id} isActive={(existingActionsFiltered || $popupData.existing || []).map(getActionTriggerId).includes(action.id)} on:click={() => changeAction({ ...action, index: full ? undefined : 0 })}>
                         <Icon id={action.icon} />
                         <p>{action.name}</p>
                     </MaterialButton>
@@ -320,16 +328,13 @@
 {/if}
 
 {#if dataInputs && (dataOpened || dataMenuOpened)}
-    <CustomInput {mainId} inputId={input} actionIndex={actionNameIndex} value={actionValue} actionId={getActionTriggerId(actionId)} on:change={(e) => changeAction({ id: actionId, actionValue: e.detail })} list />
+    <div class="menu-indent">
+        <CustomInput {mainId} inputId={input} actionIndex={actionNameIndex} value={actionValue} actionId={getActionTriggerId(actionId)} on:change={(e) => changeAction({ id: actionId, actionValue: e.detail })} list />
+    </div>
 {/if}
 
 {#if mode === "slide" && getActionTriggerId(actionId) === "run_action" && $categories[_show().get().category]?.action}
-    <MaterialToggleSwitch
-        label="actions.override_category_action"
-        checked={customData.overrideCategoryAction}
-        defaultValue={false}
-        on:change={(e) => changeAction({ id: actionId, customDataKey: "overrideCategoryAction", customDataValue: e.detail })}
-    />
+    <MaterialToggleSwitch label="actions.override_category_action" checked={customData.overrideCategoryAction} defaultValue={false} on:change={(e) => changeAction({ id: actionId, customDataKey: "overrideCategoryAction", customDataValue: e.detail })} />
 {/if}
 
 <style>
@@ -368,5 +373,12 @@
     }
     .buttons :global(button:not(.active):nth-child(odd)) {
         background-color: rgb(0 0 20 / 0.08) !important;
+    }
+
+    .menu-indent {
+        display: flex;
+        flex-direction: column;
+
+        border-left: 4px solid var(--primary-lighter);
     }
 </style>

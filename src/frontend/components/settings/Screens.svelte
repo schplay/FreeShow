@@ -15,6 +15,7 @@
     import MaterialNumberInput from "../inputs/MaterialNumberInput.svelte"
     import MaterialRadialPicker from "../inputs/MaterialRadialPicker.svelte"
     import MaterialToggleSwitch from "../inputs/MaterialToggleSwitch.svelte"
+    import Tip from "../main/Tip.svelte"
 
     export let activateOutput = false
 
@@ -46,7 +47,7 @@
     let totalScreensHeight = 0
 
     onMount(async () => {
-        const displays = await requestMain(Main.GET_DISPLAYS)
+        const displays = (await requestMain(Main.GET_DISPLAYS)) || []
         let sortedScreens = displays.sort(sortScreensByPosition)
         screens = sortedScreens.sort(internalFirst)
 
@@ -205,7 +206,7 @@
 {#if editCropping}
     <MaterialButton class="popup-back" icon="back" iconSize={1.3} title="actions.back" on:click={() => (editCropping = false)} />
 
-    <p class="tip"><T id="screen.cropping_tip" /></p>
+    <Tip value="screen.cropping_tip" bottom={20} />
 
     <MaterialNumberInput label="screen.top" value={cropping.top || 0} defaultValue={0} max={currentScreen.bounds?.height * 0.9 - (cropping.bottom || 0)} on:change={(e) => updateCropping(e.detail, "top")} />
     <MaterialNumberInput label="screen.right" value={cropping.right || 0} defaultValue={0} max={currentScreen.bounds?.width * 0.9 - (cropping.left || 0)} on:change={(e) => updateCropping(e.detail, "right")} />
@@ -216,21 +217,14 @@
     <div class="preview" style="margin-top: 20px;">
         <div class="border" style="width: {currentScreen.bounds?.width * previewSize}px;height: {currentScreen.bounds?.height * previewSize}px;">
             <div class="cropped" style={getCroppedStyle(cropping)}>
-                <div
-                    class="previewWindow"
-                    style="aspect-ratio: {currentScreen.bounds?.width} / {currentScreen.bounds?.height};max-height: {(currentScreen.bounds?.height - (cropping.top || 0) - (cropping.bottom || 0)) * previewSize}px;max-width: {(currentScreen.bounds
-                        ?.width -
-                        (cropping.left || 0) -
-                        (cropping.right || 0)) *
-                        previewSize}px;"
-                ></div>
+                <div class="previewWindow" style="aspect-ratio: {currentScreen.bounds?.width} / {currentScreen.bounds?.height};max-height: {(currentScreen.bounds?.height - (cropping.top || 0) - (cropping.bottom || 0)) * previewSize}px;max-width: {(currentScreen.bounds?.width - (cropping.left || 0) - (cropping.right || 0)) * previewSize}px;"></div>
             </div>
         </div>
     </div>
 {:else if editEdgeBlending}
     <MaterialButton class="popup-back" icon="back" iconSize={1.3} title="actions.back" on:click={() => (editEdgeBlending = false)} />
 
-    <p class="tip"><T id="screen.edge_blending_tip" /></p>
+    <Tip value="screen.edge_blending_tip" bottom={20} />
 
     <MaterialNumberInput label="screen.left" value={blending.left || 0} defaultValue={0} max={500} on:change={(e) => updateBlending(e.detail, "left")} />
     <MaterialNumberInput label="screen.right" value={blending.right || 0} defaultValue={0} max={100} on:change={(e) => updateBlending(e.detail, "right")} />
@@ -255,15 +249,11 @@
         <MaterialButton class="popup-options {showMore ? 'active' : ''}" icon="options" iconSize={1.3} title={showMore ? "actions.close" : "create_show.more_options"} on:click={() => (showMore = !showMore)} white />
     {/if}
 
-    <p class="tip"><T id="settings.{currentScreen.boundsLocked ? 'output_locked' : 'select_display'}" /></p>
-    <MaterialButton
-        variant="outlined"
-        style="width: 100%;"
-        icon="edit"
-        disabled={currentScreen.boundsLocked}
-        on:click={() => activePopup.set("change_output_values")}
-        title={activateOutput ? "popup.change_output_values" : "settings.manual_input_hint"}
-    >
+    {#key currentScreen.boundsLocked}
+        <Tip value="settings.{currentScreen.boundsLocked ? 'output_locked' : 'select_display'}" bottom={20} />
+    {/key}
+
+    <MaterialButton variant="outlined" style="width: 100%;" icon="edit" disabled={currentScreen.boundsLocked} on:click={() => activePopup.set("change_output_values")} title={activateOutput ? "popup.change_output_values" : "settings.manual_input_hint"}>
         <p><T id={activateOutput ? "settings.manual_input_hint" : "popup.change_output_values"} /></p>
     </MaterialButton>
 
@@ -285,10 +275,7 @@
             <!-- + (!activateOutput && showMore ? -50 : 80) -->
             <div class="screens" style="transform: translate(-{totalScreensWidth}px, -{totalScreensHeight}px)">
                 <!-- {#if !currentScreen.screen || !screens.find((a) => a.id.toString() === currentScreen.screen)} -->
-                <div
-                    style="position: absolute;width: {currentScreen.bounds?.width}px;height: {currentScreen.bounds?.height}px;inset-inline-start: {currentScreen.bounds?.x - (minPosX ? minPosX : 0)}px;top: {currentScreen.bounds?.y -
-                        (minPosY ? minPosY : 0)}px;"
-                >
+                <div style="position: absolute;width: {currentScreen.bounds?.width}px;height: {currentScreen.bounds?.height}px;inset-inline-start: {currentScreen.bounds?.x - (minPosX ? minPosX : 0)}px;top: {currentScreen.bounds?.y - (minPosY ? minPosY : 0)}px;">
                     {#if currentScreen.screen}
                         <span style="z-index: 2;position: absolute;top: 50%;left: 50%;transform: translate(-50%, -50%);">{screens.findIndex((a) => JSON.stringify(currentScreen.bounds) === JSON.stringify(a.bounds)) + 1 || ""}</span>
                     {/if}
@@ -337,14 +324,6 @@
 {/if}
 
 <style>
-    .tip {
-        margin-bottom: 10px;
-
-        opacity: 0.7;
-        font-size: 0.8em;
-        /* text-align: center; */
-    }
-
     .content {
         width: 100%;
         display: flex;

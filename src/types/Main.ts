@@ -1,4 +1,4 @@
-import type fs from "fs"
+import type { Stats } from "fs"
 import type { dataFolderNames } from "../electron/utils/files"
 import type { Cropping } from "./Settings"
 
@@ -8,12 +8,26 @@ export interface Config {
     bounds: Electron.Rectangle
     dataPath: string | null
     disableHardwareAcceleration: boolean | null
+    autoErrorReporting?: boolean
+    mediaFolderPath?: string
 }
 
 export interface OS {
     platform: NodeJS.Platform
     name: string
     arch: string
+}
+
+export interface SpotifyState {
+    isPlaying: boolean
+    title: string
+    artist: string
+    albumArt?: string
+    positionSec: number
+    durationSec: number
+    platform: NodeJS.Platform
+    volume: number
+    bgColor?: string
 }
 
 export interface Option {
@@ -52,6 +66,8 @@ export interface ClickEvent {
 }
 
 export type SelectIds =
+    | "files"
+    | "urls"
     | "slide"
     | "slide_icon"
     | "group"
@@ -61,7 +77,6 @@ export type SelectIds =
     | "show_drawer"
     | "project"
     | "folder"
-    | "files"
     | "category_shows"
     | "category_media"
     | "category_overlays"
@@ -89,7 +104,6 @@ export type SelectIds =
     | "timer"
     | "global_timer"
     | "variable"
-    | "trigger"
     | "audio_stream"
     | "chord"
     | "midi"
@@ -150,6 +164,8 @@ export interface ActiveEdit {
     data?: any // camera data
 }
 
+export type FileFolder = { isFolder: false; path: string; name: string; thumbnailPath?: string; stats: Stats } | { isFolder: true; path: string; name: string; files: string[] }
+
 export type MediaFit = "contain" | "cover" | "fill" | "blur"
 export interface Media {
     [key: string]: MediaStyle
@@ -164,18 +180,24 @@ export interface MediaStyle {
     speed?: string
     fromTime?: number
     toTime?: number
+    softLoop?: number
     videoType?: string // default | "background" | "foreground"
     audioType?: AudioType // default | "music" | "effect"
     favourite?: boolean
     audio?: boolean
     loop?: boolean // audio
     volume?: number // audio
+    pitch?: number // audio
+    tempo?: number // audio
     rendering?: string // image rendering
     info?: any // cached codec/mime data
     tracks?: Subtitle[]
     subtitle?: string
     tags?: string[] // media tags
-    pingbackUrl?: string // URL to ping after 30+ seconds of playback
+    name?: string // display name for content provider media (encrypted videos)
+    contentFile?: any // ContentFile from content provider (imported type would create circular dependency)
+    licenseExpiresAt?: number // unix ms; content provider license is valid while Date.now() < licenseExpiresAt
+    pingbackUrl?: string // URL for sending pingback after playback
     cropping?: Partial<Cropping>
 
     ignoreLayer?: boolean // foreground background type
@@ -246,7 +268,7 @@ export interface Variable {
     eachNumberOnce?: boolean
     sets?: { name: string; minValue?: number; maxValue?: number }[]
     setName?: string // chosen random set
-    setLog?: { name: string; number: number }[]
+    setLog?: { name: string; number: string }[]
 
     // text
     text?: string
@@ -266,7 +288,7 @@ export interface Trigger {
 
 export interface FileData {
     path: string
-    stat: fs.Stats
+    stat: Stats
     extension: string
     folder: boolean
     name: string
@@ -279,8 +301,11 @@ export interface Profiles {
 export interface Profile {
     name: string
     color: string
+    password?: string // currently admin only
+    autoOpenLastUsed?: boolean // admin only
     image: string
     access: { [key: string]: { [key: string]: AccessType } }
+    action?: string // action that triggers each time this profile is selected
 }
 export type AccessType = "none" | "read" | "write"
 
@@ -317,14 +342,15 @@ export type Popups =
     | "manage_dynamic_values"
     | "player"
     | "template_style_overrides"
+    | "regex_manager"
     | "rename"
     | "color"
     | "color_gradient"
     | "find_replace"
     | "timer"
     | "variable"
-    | "trigger"
     | "audio_stream"
+    | "now_playing"
     | "aspect_ratio"
     | "max_lines"
     | "transition"
@@ -332,7 +358,6 @@ export type Popups =
     | "metadata_display"
     | "import_scripture"
     | "create_collection"
-    | "scripture_show"
     | "edit_event"
     | "choose_chord"
     | "choose_screen"
@@ -345,16 +370,18 @@ export type Popups =
     | "assign_shortcut"
     | "dynamic_values"
     | "conditions"
-    | "animate"
     | "translate"
     | "next_timer"
     | "display_duration"
     | "manage_tags"
     | "about"
+    | "update_manager"
     | "shortcuts"
     | "unsaved"
+    | "restore"
     | "reset_all"
     | "alert"
+    | "new_update"
     | "history"
     | "action_history"
     | "manage_emitters"
@@ -363,10 +390,16 @@ export type Popups =
     | "custom_action"
     | "slide_midi"
     | "connect"
+    | "cloud_sync"
     | "cloud_update"
     | "cloud_method"
     | "sync_categories"
     | "effect_items"
+    | "timeline"
+    | "timecode"
+    | "drawer_search_options"
+    | "template_info"
+    | "cleaning_utility"
 
 export type DefaultProjectNames = "date" | "today" | "sunday" | "week" | "custom" | "blank"
 

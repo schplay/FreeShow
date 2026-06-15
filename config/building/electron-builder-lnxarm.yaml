@@ -18,10 +18,18 @@ extraResources:
 
 linux:
     asarUnpack:
-        - node_modules/grandiose/**
+        - "**/node_modules/grandiose/**"
+        - "**/node_modules/macadam/**/*.node"
+        - "**/node_modules/libltc-wrapper/**/*"
     category: AudioVideo
     target:
         - AppImage
         - deb
         - rpm
     icon: build/public
+
+deb:
+    depends:
+        - libfontconfig1
+        - uuid-runtime
+        - libltc11

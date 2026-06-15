@@ -1,12 +1,21 @@
 import { get } from "svelte/store"
 import type { AudioChannel } from "../../types/Audio"
 import { AUDIO, OUTPUT } from "../../types/Channels"
-import { currentWindow, disabledServers, outputs, playingAudio, playingVideos, serverData, special } from "../stores"
+import { audioEffects, disabledServers, media, outputs, playingAudio, playingVideos, serverData, special, videosData } from "../stores"
+import { isOutputWindow } from "../utils/common"
 import { send } from "../utils/request"
 import { AudioAnalyserMerger } from "./audioAnalyserMerger"
-import { connectAudioSourceToEqualizer, disconnectAudioSourceFromEqualizer, getConnectedSourceOutput, initializeEqualizer, setAutoInitializeCallback } from "./audioEqualizer"
 import { AudioMultichannel, MultichannelInfo } from "./audioMultichannel"
 import { AudioPlayer } from "./audioPlayer"
+import { AudioProcessor, PitchShiftNode } from "./audioProcessor"
+import { initializeCompressor } from "./effects/audioCompressor"
+import { initializeDelay } from "./effects/audioDelay"
+import { connectAudioSourceToEqualizer, disconnectAudioSourceFromEqualizer, getConnectedSourceOutput, initializeEqualizer, setAutoInitializeCallback } from "./effects/audioEqualizer"
+import { initializeFilter } from "./effects/audioFilter"
+import { initializeLimiter } from "./effects/audioLimiter"
+import { initializeNoiseGate } from "./effects/audioNoiseGate"
+import { initializeReverb } from "./effects/audioReverb"
+import { initializeStereoShaper } from "./effects/audioStereoShaper"
 
 export class AudioAnalyser {
     static sampleRate = 48000 // Hz
@@ -19,9 +28,15 @@ export class AudioAnalyser {
     private static splitter: ChannelSplitterNode | null = null
     private static analysers: AnalyserNode[] = []
     private static sources: { [key: string]: AudioNode } = {}
+    private static processors: { [key: string]: PitchShiftNode } = {}
+    private static gainNodes: { [key: string]: GainNode } = {}
+    private static timeDomainArray = new Uint8Array(256)
 
     // Expose the AudioContext for other audio systems to use the same context
     static getAudioContext(): AudioContext {
+        if (this.ac.state === "suspended") {
+            this.ac.resume().catch(() => {})
+        }
         return this.ac
     }
 
@@ -32,55 +47,124 @@ export class AudioAnalyser {
                 await this.refreshEqualizerConnections()
             })
         })
+
+        playingAudio.subscribe(() => this.updateScales())
+        playingVideos.subscribe(() => this.updateScales())
+        videosData.subscribe(() => this.updateScales())
     }
 
     static async attach(id: string, audio: HTMLMediaElement | MediaStream) {
         if (this.sources[id]) return
+
+        if (this.ac.state === "suspended") {
+            this.ac.resume().catch(() => {})
+        }
 
         let source: AudioNode
         try {
             if (audio instanceof MediaStream) source = this.ac.createMediaStreamSource(audio)
             else source = this.ac.createMediaElementSource(audio)
 
-            // detect number of channels in audio source
-            const detectedChannels = AudioMultichannel.detectChannelCount(source, audio, this.maxChannels)
-            if (detectedChannels > this.channels) this.updateChannelCount(detectedChannels)
-
-            this.sources[id] = source
+            const audioChannel = get(special).audioChannel || ""
+            if (audioChannel === "mono_left" || audioChannel === "mono_right") {
+                const merger = this.ac.createChannelMerger(2)
+                const channel = audioChannel === "mono_left" ? 0 : 1
+                source.connect(merger, 0, channel)
+                this.sources[id] = merger
+            } else {
+                this.sources[id] = source
+            }
         } catch (err) {
             console.error("Could not create media source:", err)
             return
         }
 
+        // Start the pipeline immediately with the current channel count (no blocking)
         this.initAnalysers()
         this.initRecorder()
         this.customOutput(get(special).audioOutput)
 
-        // Connect through equalizer first, then to analysis chain
-        const eqOutputNode = await connectAudioSourceToEqualizer(id, source)
+        const eqOutputNode = await connectAudioSourceToEqualizer(id, this.sources[id])
 
-        // Connect the equalizer output (or original source if EQ bypassed) to analysis chain
         if (eqOutputNode && this.splitter) {
-            eqOutputNode.connect(this.splitter)
-            this.connectGain(eqOutputNode)
-            this.connectDestination(eqOutputNode)
-            console.log(`Audio source "${id}" connected to equalizer and analysis chain`)
+            const processor = AudioProcessor.createNode(this.ac)
+            this.processors[id] = processor
 
-            // Perform runtime channel detection after connection and audio stabilization
-            // timeout to give more time for audio to stabilize
-            setTimeout(async () => {
-                try {
-                    const runtimeChannels = await this.detectActiveChannelCount(id)
-                    if (runtimeChannels > this.channels) {
-                        console.log(`Runtime detection found ${runtimeChannels} channels, updating from ${this.channels}`)
-                        this.updateChannelCount(runtimeChannels)
-                    }
-                } catch (err) {
-                    console.warn(`Runtime channel detection failed for ${id}:`, err)
-                }
-            }, 1500)
+            // Create individual gain node to control this source's volume in Web Audio
+            const sourceGain = this.ac.createGain()
+            this.gainNodes[id] = sourceGain
+            const initialVolume = audio instanceof HTMLMediaElement ? audio.volume : 1.0
+            sourceGain.gain.setValueAtTime(initialVolume, this.ac.currentTime)
+
+            eqOutputNode.connect(sourceGain)
+            sourceGain.connect(processor.input)
+            this.connectToSinks(processor)
+
+            const mediaData = get(media)[id]
+            if (mediaData) {
+                processor.pitch = mediaData.pitch ?? 0
+                processor.tempo = mediaData.tempo ?? 1
+            }
+
+            this.updateScales()
+
+            console.log(`Audio source "${id}" connected to equalizer and analysis chain (${this.channels} channels, volume: ${initialVolume.toFixed(2)})`)
         } else {
             console.warn(`Failed to connect audio source "${id}" to equalizer`)
+        }
+
+        // Detect true channel count in the background — upgrades the graph if the file
+        // has more channels than the current default. Does not delay playback startup.
+        this.detectAndUpgradeChannels(id, audio)
+    }
+
+    static setSourceVolume(id: string, volume: number) {
+        if (this.ac.state === "suspended") {
+            this.ac.resume().catch(() => {})
+        }
+        const gainNode = this.gainNodes[id]
+        if (gainNode) {
+            const activeCount = Object.values(get(playingAudio)).filter((a) => !a.paused).length + Object.values(get(playingVideos)).filter((v) => !v.video?.paused && !v.video?.muted).length
+            const scale = activeCount > 0 ? 1 / Math.sqrt(activeCount) : 1
+            gainNode.gain.setValueAtTime(volume * scale, this.ac.currentTime)
+        }
+    }
+
+    private static updateScales() {
+        const activeCount = Object.values(get(playingAudio)).filter((a) => !a.paused).length + Object.values(get(playingVideos)).filter((v) => !v.video?.paused && !v.video?.muted).length
+        const scale = activeCount > 0 ? 1 / Math.sqrt(activeCount) : 1
+
+        Object.keys(this.gainNodes).forEach((id) => {
+            const gainNode = this.gainNodes[id]
+            if (gainNode) {
+                let baseVolume = 1.0
+                const audioPlaying = get(playingAudio)[id]
+                if (audioPlaying) {
+                    baseVolume = audioPlaying.audio?.volume ?? 1.0
+                } else {
+                    const videoPlaying = get(playingVideos).find((v) => v.id === id)
+                    baseVolume = videoPlaying?.video?.volume ?? 1.0
+                }
+                gainNode.gain.setValueAtTime(baseVolume * scale, this.ac.currentTime)
+            }
+        })
+    }
+
+    private static detectAndUpgradeChannels(id: string, audio: HTMLMediaElement | MediaStream) {
+        if (audio instanceof HTMLMediaElement && audio.src) {
+            AudioMultichannel.detectFileChannelCount(audio.src, this.maxChannels)
+                .then((channels) => {
+                    if (channels > this.channels) {
+                        console.log(`Upgrading to ${channels} channels for "${id}"`)
+                        this.updateChannelCount(channels)
+                    }
+                })
+                .catch((err) => {
+                    console.debug(`Channel detection skipped for "${id}":`, err)
+                })
+        } else if (audio instanceof MediaStream) {
+            const ch = audio.getAudioTracks()[0]?.getSettings().channelCount
+            if (ch && ch > this.channels) this.updateChannelCount(ch)
         }
     }
 
@@ -88,16 +172,31 @@ export class AudioAnalyser {
         const source = this.sources[id]
         if (!source) return
 
+        const processor = this.processors[id]
+        const outputNode = processor || getConnectedSourceOutput(id) || source
+
         this.recorderDeactivate()
-        this.disconnectGain(source)
-        this.disconnectDestination(source)
+        this.disconnectFromSinks(outputNode)
+
+        // Disconnect and remove processor
+        if (processor) {
+            delete this.processors[id]
+        }
+
+        const sourceGain = this.gainNodes[id]
+        if (sourceGain) {
+            try {
+                sourceGain.disconnect()
+            } catch (e) {}
+            delete this.gainNodes[id]
+        }
 
         // Disconnect from equalizer
         disconnectAudioSourceFromEqualizer(id)
 
         delete this.sources[id]
 
-        if (get(currentWindow) !== "output") return
+        if (!isOutputWindow()) return
 
         // wait for audio to clear before checking
         setTimeout(() => {
@@ -115,7 +214,7 @@ export class AudioAnalyser {
         return !!Object.values(get(playingAudio)).filter((a) => !a.paused).length
     }
     private static getActiveVideos() {
-        return !!Object.values(get(playingVideos)).filter((a) => !a.paused && !a.muted).length
+        return !!Object.values(get(playingVideos)).filter((a) => !a.video?.paused && !a.video?.muted).length
     }
     private static sendOutputShowAudio() {
         return get(disabledServers).output_stream === false && get(serverData)?.output_stream?.sendAudio
@@ -134,24 +233,19 @@ export class AudioAnalyser {
 
         const MERGER = AudioMultichannel.createChannelMerger(this.ac, this.channels)
 
-            // analyse left/right channels individually
-            ;[...Array(this.channels)].forEach((_, channel) => {
-                const analyser = (this.analysers[channel] = this.ac.createAnalyser())
-                analyser.smoothingTimeConstant = 0.85
-                analyser.fftSize = 256
-                this.splitter!.connect(analyser, channel)
-                this.splitter!.connect(MERGER, channel, channel)
-            })
+        // analyse left/right channels individually
+        ;[...Array(this.channels)].forEach((_, channel) => {
+            const analyser = (this.analysers[channel] = this.ac.createAnalyser())
+            analyser.smoothingTimeConstant = 0.85
+            analyser.fftSize = 256
+            this.splitter!.connect(analyser, channel)
+            this.splitter!.connect(MERGER, channel, channel)
+        })
 
         AudioAnalyserMerger.init()
     }
 
     // MULTI CHANNEL
-
-    static async detectActiveChannelCount(sourceId: string): Promise<number> {
-        const source = this.sources[sourceId]
-        return AudioMultichannel.detectActiveChannelCount(this.ac, source, sourceId, this.maxChannels)
-    }
 
     static getChannelInfo(): MultichannelInfo {
         return AudioMultichannel.getChannelInfo(this.ac, this.channels, this.maxChannels)
@@ -220,12 +314,57 @@ export class AudioAnalyser {
     }
 
     private static gainNode: GainNode | null = null
+    private static effectNodes: { [K: string]: { input: GainNode; output: GainNode } } = {}
+
     private static initGain() {
         if (this.gainNode) return
 
         this.gainNode = AudioMultichannel.createMultichannelGainNode(this.ac, this.channels)
-        this.gainNode.connect(this.ac.destination)
         this.gainNode.gain.value = AudioPlayer.getGain()
+        this.rebuildEffectChain()
+
+        // Rebuild chain when any effect is toggled (not on param changes)
+        let prevEnabled = ""
+        audioEffects.subscribe(() => {
+            const m = get(audioEffects).main
+            const enabled = [m?.filter, m?.noiseGate, m?.compressor, m?.reverb, m?.delay, m?.limiter, m?.stereoShaper].map((e) => (e?.enabled ? 1 : 0)).join("")
+            if (enabled !== prevEnabled) {
+                prevEnabled = enabled
+                this.rebuildEffectChain()
+            }
+        })
+    }
+
+    private static rebuildEffectChain() {
+        if (!this.gainNode) return
+
+        try {
+            this.gainNode.disconnect()
+        } catch {
+            /* not yet connected */
+        }
+        for (const node of Object.values(this.effectNodes))
+            try {
+                node.output.disconnect()
+            } catch {}
+
+        const main = get(audioEffects).main
+        const chain: { input: GainNode; output: GainNode }[] = []
+
+        if (main?.filter?.enabled) chain.push((this.effectNodes.filter ??= initializeFilter(this.ac)))
+        if (main?.noiseGate?.enabled) chain.push((this.effectNodes.noiseGate ??= initializeNoiseGate(this.ac)))
+        if (main?.compressor?.enabled) chain.push((this.effectNodes.compressor ??= initializeCompressor(this.ac)))
+        if (main?.reverb?.enabled) chain.push((this.effectNodes.reverb ??= initializeReverb(this.ac)))
+        if (main?.delay?.enabled) chain.push((this.effectNodes.delay ??= initializeDelay(this.ac)))
+        if (main?.limiter?.enabled) chain.push((this.effectNodes.limiter ??= initializeLimiter(this.ac)))
+        if (main?.stereoShaper?.enabled) chain.push((this.effectNodes.stereoShaper ??= initializeStereoShaper(this.ac)))
+
+        let prev: AudioNode = this.gainNode
+        for (const seg of chain) {
+            prev.connect(seg.input)
+            prev = seg.output
+        }
+        prev.connect(this.ac.destination)
     }
 
     static setGain(value: number) {
@@ -233,16 +372,49 @@ export class AudioAnalyser {
         this.gainNode!.gain.value = Math.max(1, value)
     }
 
-    private static connectGain(source: AudioNode) {
-        this.initGain()
-        source.connect(this.gainNode!)
+    static setPitch(id: string, value: number) {
+        const processor = this.processors[id]
+        if (processor) {
+            processor.pitch = value
+        }
     }
 
-    private static disconnectGain(source: AudioNode) {
-        if (!this.gainNode) return
+    static setTempo(id: string, value: number) {
+        const processor = this.processors[id]
+        if (processor) {
+            processor.tempo = value
+        }
+    }
 
+    static connectToSinks(source: AudioNode | PitchShiftNode) {
+        if (!this.splitter) return
+        source.connect(this.splitter)
+        this.connectGain(source)
+        this.connectDestination(source)
+    }
+
+    static disconnectFromSinks(source: AudioNode | PitchShiftNode) {
+        const node = source instanceof PitchShiftNode ? source.output : source
         try {
-            source.disconnect(this.gainNode)
+            if (this.splitter) node.disconnect(this.splitter)
+        } catch (e) {
+            /* ignore */
+        }
+        this.disconnectGain(source)
+        this.disconnectDestination(source)
+    }
+
+    static connectGain(source: AudioNode | PitchShiftNode) {
+        this.initGain()
+        const node = source instanceof PitchShiftNode ? source.output : source
+        node.connect(this.gainNode!)
+    }
+
+    static disconnectGain(source: AudioNode | PitchShiftNode) {
+        if (!this.gainNode) return
+        const node = source instanceof PitchShiftNode ? source.output : source
+        try {
+            node.disconnect(this.gainNode)
         } catch (err) {
             // Node was already disconnected, ignore the error
         }
@@ -255,19 +427,18 @@ export class AudioAnalyser {
         this.destNode = AudioMultichannel.createMultichannelDestination(this.ac, this.channels)
     }
 
-    private static connectDestination(source: AudioNode) {
+    static connectDestination(source: AudioNode | PitchShiftNode) {
         this.initDestination()
-
-        AudioMultichannel.configureNodeForMultichannel(source, this.channels)
-
-        source.connect(this.destNode!)
+        const node = source instanceof PitchShiftNode ? source.output : source
+        AudioMultichannel.configureNodeForMultichannel(node, this.channels)
+        node.connect(this.destNode!)
     }
 
-    private static disconnectDestination(source: AudioNode) {
+    static disconnectDestination(source: AudioNode | PitchShiftNode) {
         if (!this.destNode) return
-
+        const node = source instanceof PitchShiftNode ? source.output : source
         try {
-            source.disconnect(this.destNode)
+            node.disconnect(this.destNode)
         } catch (err) {
             // Node was already disconnected, ignore the error
         }
@@ -279,28 +450,38 @@ export class AudioAnalyser {
         if (this.recorder || !this.recorderActive) return
         this.initDestination()
 
-        const id = get(currentWindow) === "output" ? Object.keys(get(outputs))[0] : "main"
+        const id = isOutputWindow() ? Object.keys(get(outputs))[0] : "main"
         // might only work in "main" for OutputShow
 
-        this.recorder = new MediaRecorder(this.destNode!.stream, {
-            mimeType: 'audio/webm; codecs="opus"',
-        })
-        this.recorder.addEventListener("dataavailable", async (ev) => {
-            const arrayBuffer = await ev.data.arrayBuffer()
-            const uint8Array = new Uint8Array(arrayBuffer)
-            // , audioDelay: 0, channels: this.channels, frameRate: this.recorderFrameRate
-            send(AUDIO, ["CAPTURE"], { id, buffer: uint8Array })
-        })
+        try {
+            this.recorder = new MediaRecorder(this.destNode!.stream, {
+                mimeType: 'audio/webm; codecs="opus"'
+            })
+            this.recorder.addEventListener("dataavailable", async (ev) => {
+                const arrayBuffer = await ev.data.arrayBuffer()
+                const uint8Array = new Uint8Array(arrayBuffer)
+                // , audioDelay: 0, channels: this.channels, frameRate: this.recorderFrameRate
+                const icecast = { enabled: !!get(special).icecastEnabled, host: get(special).icecastHost, port: get(special).icecastPort, mount: get(special).icecastMount, password: get(special).icecastPassword }
 
-        if (this.recorder.state === "paused") this.recorder.play()
-        else if (this.recorder.state !== "recording") {
-            this.recorder.start(Math.round(1000 / this.recorderFrameRate))
+                send(AUDIO, ["CAPTURE"], { id, buffer: uint8Array, icecast })
+            })
+
+            if (this.recorder.state === "paused") this.recorder.play()
+            else if (this.recorder.state !== "recording") {
+                this.recorder.start(Math.round(1000 / this.recorderFrameRate))
+            }
+        } catch (err) {
+            console.error(`[AudioAnalyser] Failed to start MediaRecorder:`, err)
         }
     }
 
     private static recorderActive = false
     static recorderActivate() {
         if (!this.shouldBeActive()) return
+
+        if (this.ac.state === "suspended") {
+            this.ac.resume().catch(() => {})
+        }
 
         this.recorderActive = true
         this.initRecorder()
@@ -315,10 +496,20 @@ export class AudioAnalyser {
 
     private static shouldBeActive() {
         let outputList = Object.values(get(outputs))
-        if (get(currentWindow) === "output") outputList = [Object.values(get(outputs))[0]]
+        if (isOutputWindow()) outputList = [Object.values(get(outputs))[0]]
+
+        // any outputs with webrtc streaming enabled
+        if (outputList.find((a) => a && a.enabled && a.webrtc)) return true
 
         // any outputs with ndi audio enabled
-        if (outputList.find((a) => a.enabled && a.ndi && a.ndiData?.audio)) return true
+        if (outputList.find((a) => a && a.enabled && a.ndi && a.ndiData?.audio)) return true
+
+        // any outputs with blackmagic enabled (audio always enabled for blackmagic)
+        if (outputList.find((a) => a && a.enabled && a.blackmagic)) return true
+
+        // Icecast streaming enabled
+        if (get(special).icecastEnabled) return true
+
         return false
     }
 
@@ -338,7 +529,11 @@ export class AudioAnalyser {
     // CHANNEL
 
     static getChannelsVolume() {
-        return [...Array(this.channels)].map((_, channel) => this.getChannelVolume(channel))
+        const volumes: AudioChannel[] = []
+        for (let channel = 0; channel < this.channels; channel++) {
+            volumes.push(this.getChannelVolume(channel))
+        }
+        return volumes
     }
 
     private static getChannelVolume(channelIndex: number): AudioChannel {
@@ -349,23 +544,27 @@ export class AudioAnalyser {
         analyser.maxDecibels = AudioAnalyserMerger.dBmax
 
         const size = analyser.fftSize // 256
-        const array = new Uint8Array(size)
+        if (this.timeDomainArray.length !== size) {
+            this.timeDomainArray = new Uint8Array(size)
+        }
+        const array = this.timeDomainArray
 
         // analyze amplitude values in time domain
         analyser.getByteTimeDomainData(array)
 
         // calculate RMS value to represent perceived volume
-        const sumOfSquares = array.reduce((sum, value) => {
-            const normalizedValue = (value - 128) / 128 // Normalize between -1 and 1
-            return sum + normalizedValue * normalizedValue
-        }, 0)
+        let sumOfSquares = 0
+        const len = array.length
+        for (let i = 0; i < len; i++) {
+            const normalizedValue = (array[i] - 128) / 128 // Normalize between -1 and 1
+            sumOfSquares += normalizedValue * normalizedValue
+        }
 
-        const rms = Math.sqrt(sumOfSquares / array.length)
+        const rms = Math.sqrt(sumOfSquares / len)
 
         // map RMS to dB scale & protect against log(0)
         const dB = 20 * Math.log10(rms || 0.0001)
 
-        // const volume = rms
         return { dB: { value: dB } }
     }
 
@@ -417,9 +616,14 @@ export class AudioAnalyser {
 
                         // Connect new equalizer output to analysis chain
                         if (this.splitter) {
-                            newEqOutputNode.connect(this.splitter)
-                            this.connectGain(newEqOutputNode)
-                            this.connectDestination(newEqOutputNode)
+                            const processor = this.processors[id]
+                            const outputNode = processor || newEqOutputNode
+
+                            if (processor) {
+                                newEqOutputNode.connect(processor.input)
+                            }
+
+                            this.connectToSinks(outputNode)
                         }
 
                         console.log(`Seamlessly switched equalizer connection for audio source: ${id}`)

@@ -1,7 +1,35 @@
+import { sanitizeVerseText } from "../../../common/scripture/sanitizeVerseText"
 import type { Item, Show } from "../../../types/Show"
 import { setError, translate } from "./helpers"
 import { send } from "./socket"
-import { _, _get, _set, _update, currentScriptureState, overlays, scriptures, scriptureCache } from "./stores"
+import { _, _get, _set, _update, activeTimers, currentScriptureState, mixer, overlays, runningActions, scriptureCache, scriptures, timers } from "./stores"
+
+function sanitizeBiblePayload(bible: any) {
+    if (!bible || !Array.isArray(bible.books)) return bible
+
+    const books = bible.books.map((book: any) => ({
+        ...book,
+        chapters: Array.isArray(book.chapters)
+            ? book.chapters.map((chapter: any) => ({
+                  ...chapter,
+                  verses: sanitizeChapterVerses(chapter.verses)
+              }))
+            : book.chapters
+    }))
+
+    return { ...bible, books }
+}
+
+function sanitizeChapterVerses(verses: any) {
+    if (!Array.isArray(verses)) return verses
+
+    return verses.map((verse: any, index: number) => {
+        const sanitizedVerse = { ...verse }
+        sanitizedVerse.number = sanitizedVerse.number || index + 1
+        sanitizedVerse.text = sanitizeVerseText(sanitizedVerse.text || sanitizedVerse.value || "")
+        return sanitizedVerse
+    })
+}
 
 export type ReceiverKey = keyof typeof receiver
 export const receiver = {
@@ -30,7 +58,7 @@ export const receiver = {
     ACCESS: () => {
         if (_get("password").remember && _get("password").stored.length) localStorage.password = _get("password").stored
         _set("isConnected", true)
-        
+
         // Request current output data which should include scripture state
         send("API:get_output")
     },
@@ -99,14 +127,11 @@ export const receiver = {
     PROJECTS: (data: any) => {
         if (!_get("isConnected")) return
 
-        _set("projects", data)
-        // newest first
-        _set(
-            "projects",
-            _get("projects").sort((a, b) => b.created - a.created)
-        )
+        // Sort once before setting to avoid double store update
+        const sortedProjects = [...data].sort((a: any, b: any) => b.created - a.created)
+        _set("projects", sortedProjects)
 
-        const project = data.find((a: any) => a.id === _get("project"))
+        const project = sortedProjects.find((a: any) => a.id === _get("project"))
         if (project) _set("activeProject", project)
     },
     PROJECT: (data: any) => {
@@ -121,6 +146,9 @@ export const receiver = {
     },
     SCRIPTURE: (data: any) => {
         scriptures.set(data)
+    },
+    CATEGORIES: (data: any) => {
+        _.categories.set(data)
     },
     ACTIVE_SCRIPTURE: (data: any) => {
         const source: any = data?.api || data?.bible || data || {}
@@ -152,38 +180,36 @@ export const receiver = {
             // Sanitize, dedupe and sort verses to make "latest" deterministic
             activeVerses: (() => {
                 const raw = Array.isArray(source.activeVerses) ? source.activeVerses : []
-                const nums: number[] = raw
-                    .map((v: any) => parseInt(v, 10))
-                    .filter((n: number): n is number => Number.isFinite(n) && n > 0)
+                const nums: number[] = raw.map((v: any) => parseInt(v, 10)).filter((n: number): n is number => Number.isFinite(n) && n > 0)
                 return Array.from(new Set<number>(nums)).sort((a: number, b: number) => a - b)
-            })(),
+            })()
         }
-        
+
         currentScriptureState.set(normalized)
     },
     GET_SCRIPTURE: (data: any) => {
         if (!data) return
-        
+
         if (data.bible) {
-            _update("scriptureCache", data.id, data.bible)
+            _update("scriptureCache", data.id, sanitizeBiblePayload(data.bible))
             return
         }
-        
+
         const update = data.bibleUpdate
         if (!update) return
-        
+
         if (update.kind === "chapters") {
             const { id, bookIndex, chapters } = update
             if (!id || typeof bookIndex !== "number" || !Array.isArray(chapters)) return
-            
+
             scriptureCache.update((cache) => {
                 const bible = cache[id] || { books: [] as any[] }
                 const books = Array.isArray(bible.books) ? bible.books : []
                 const book = books[bookIndex] || {}
-                book.chapters = (chapters || []).map((c: any) => ({ 
-                    number: c.number, 
-                    keyName: c.keyName, 
-                    verses: [] 
+                book.chapters = (chapters || []).map((c: any) => ({
+                    number: c.number,
+                    keyName: c.keyName,
+                    verses: []
                 }))
                 books[bookIndex] = book
                 cache[id] = { ...bible, books }
@@ -191,20 +217,20 @@ export const receiver = {
             })
             return
         }
-        
+
         if (update.kind === "verses") {
             const { id, bookIndex, chapterIndex, verses } = update
             if (!id || typeof bookIndex !== "number" || typeof chapterIndex !== "number" || !Array.isArray(verses)) return
-            
+
             scriptureCache.update((cache) => {
                 const bible = cache[id] || { books: [] as any[] }
                 const books = Array.isArray(bible.books) ? bible.books : []
                 const book = books[bookIndex] || { chapters: [] as any[] }
                 const chaptersArr = Array.isArray(book.chapters) ? book.chapters : []
                 const chapter = chaptersArr[chapterIndex] || { verses: [] }
-                chapter.verses = (verses || []).map((v: any, i: number) => ({ 
-                    number: v.number || i + 1, 
-                    text: v.text || v.value || "" 
+                chapter.verses = (verses || []).map((v: any, i: number) => ({
+                    number: v.number || i + 1,
+                    text: sanitizeVerseText(v.text || v.value || "")
                 }))
                 chaptersArr[chapterIndex] = chapter
                 book.chapters = chaptersArr
@@ -214,46 +240,7 @@ export const receiver = {
             })
         }
     },
-    SCRIPTURE_CHAPTERS: (data: any) => {
-        const { id, bookIndex, chapters } = data || {}
-        if (!id || typeof bookIndex !== "number" || !Array.isArray(chapters)) return
-        
-        scriptureCache.update((cache) => {
-            const bible = cache[id] || { books: [] as any[] }
-            const books = Array.isArray(bible.books) ? bible.books : []
-            const book = books[bookIndex] || {}
-            book.chapters = (chapters || []).map((c: any) => ({ 
-                number: c.number, 
-                keyName: c.keyName, 
-                verses: [] 
-            }))
-            books[bookIndex] = book
-            cache[id] = { ...bible, books }
-            return cache
-        })
-    },
-    
-    SCRIPTURE_VERSES: (data: any) => {
-        const { id, bookIndex, chapterIndex, verses } = data || {}
-        if (!id || typeof bookIndex !== "number" || typeof chapterIndex !== "number" || !Array.isArray(verses)) return
-        
-        scriptureCache.update((cache) => {
-            const bible = cache[id] || { books: [] as any[] }
-            const books = Array.isArray(bible.books) ? bible.books : []
-            const book = books[bookIndex] || { chapters: [] as any[] }
-            const chaptersArr = Array.isArray(book.chapters) ? book.chapters : []
-            const chapter = chaptersArr[chapterIndex] || { verses: [] }
-            chapter.verses = (verses || []).map((v: any, i: number) => ({ 
-                number: v.number || i + 1, 
-                text: v.text || v.value || "" 
-            }))
-            chaptersArr[chapterIndex] = chapter
-            book.chapters = chaptersArr
-            books[bookIndex] = book
-            cache[id] = { ...bible, books }
-            return cache
-        })
-    },
+    // SCRIPTURE_CHAPTERS and SCRIPTURE_VERSES are handled by GET_SCRIPTURE's bibleUpdate handling
     SEARCH_SCRIPTURE: (data: any) => {
         // Store search results for the search component to use
         if (data.searchResults !== undefined) {
@@ -262,6 +249,136 @@ export const receiver = {
     },
     OVERLAYS: (data: any) => {
         overlays.set(data)
+    },
+    OVERLAY_CATEGORIES: (data: any) => {
+        _set("overlayCategories", data)
+    },
+    TEMPLATES: (data: any) => {
+        _set("templates", data)
+    },
+    TEMPLATE_CATEGORIES: (data: any) => {
+        _set("templateCategories", data)
+    },
+    ACTIONS: (data: any) => {
+        _set("actions", data)
+    },
+    ACTION_TAGS: (data: any) => {
+        _set("actionTags", data)
+    },
+    VARIABLES: (data: any) => {
+        _set("variables", data)
+    },
+    VARIABLE_TAGS: (data: any) => {
+        _set("variableTags", data)
+    },
+    TIMER_TAGS: (data: any) => {
+        _set("timerTags", data)
+    },
+    TIMERS: (data: any) => {
+        timers.set(data)
+    },
+    ACTIVE_TIMERS: (data: any) => {
+        activeTimers.set(data)
+    },
+    RUNNING_ACTIONS: (data: any) => {
+        runningActions.set(data)
+    },
+
+    GET_OVERLAYS: (data: any) => {
+        overlays.set(data.overlays)
+        _set("overlayCategories", data.categories)
+    },
+    GET_TEMPLATES: (data: any) => {
+        _set("templates", data.templates)
+        _set("templateCategories", data.categories)
+    },
+    GET_FUNCTIONS: (data: any) => {
+        _set("actions", data.actions)
+        _set("actionTags", data.actionTags)
+        _set("variables", data.variables)
+        _set("variableTags", data.variableTags)
+        _set("timerTags", data.timerTags)
+        timers.set(data.timers)
+        activeTimers.set(data.activeTimers)
+        runningActions.set(data.runningActions)
+    },
+    GET_AUDIO: (data: any) => {
+        _set("audio", data)
+    },
+    GET_MIXER: (data: any) => {
+        _set("mixer", data)
+    },
+    MEDIA: (data: any) => {
+        if (!data) {
+            _set("audio", {})
+            return
+        }
+
+        const audioFiles: any = {}
+
+        // Handle if data is an object of media items
+        if (typeof data === "object" && !Array.isArray(data)) {
+            Object.keys(data).forEach((id) => {
+                const item = data[id]
+                // Check various ways audio might be identified
+                if (item && (item.type === "audio" || item.audioPath || item.path?.match(/\.(mp3|wav|ogg|m4a|flac|aac|wma)$/i))) {
+                    audioFiles[id] = {
+                        id,
+                        name: item.name || item.path?.split(/[\/\\]/).pop() || id,
+                        path: item.path || item.audioPath || id,
+                        ...item
+                    }
+                }
+            })
+        }
+
+        _set("audio", audioFiles)
+    },
+    VOLUME: (data: any) => {
+        mixer.update((prev: any) => {
+            const current = prev || {}
+            return {
+                ...current,
+                main: {
+                    ...current.main,
+                    volume: data
+                }
+            }
+        })
+    },
+    OUTPUTS: (data: any) => {
+        mixer.update((prev: any) => {
+            const current = prev || {}
+            const currentOutputs = current.outputs || {}
+
+            // Merge new data with existing outputs to preserve volume/mute state if not present in update
+            const newOutputs = { ...currentOutputs }
+            Object.keys(data).forEach((id) => {
+                newOutputs[id] = { ...(newOutputs[id] || {}), ...data[id] }
+            })
+
+            return {
+                ...current,
+                outputs: newOutputs
+            }
+        })
+    },
+    AUDIO_CHANNELS_DATA: (data: any) => {
+        mixer.update((prev: any) => {
+            const current = prev || { main: {}, outputs: {} }
+            const { main, ...outs } = data
+
+            const outputs = { ...current.outputs }
+            Object.keys(outs).forEach((id) => {
+                if (outputs[id]) outputs[id] = { ...outputs[id], ...outs[id] }
+            })
+
+            return {
+                ...current,
+                main: { ...current.main, ...main },
+                outputs
+            }
+        })
     },
 
     /////
@@ -287,6 +404,29 @@ export const receiver = {
     "API:get_playing_audio_time": (data: any) => {
         _set("playingAudioTime", data)
     },
+    "API:get_playing_video_time": (data: any) => {
+        _set("playingVideoTime", data || 0)
+    },
+    "API:get_playing_video_duration": (data: any) => {
+        _set("playingVideoDuration", data || 0)
+    },
+    "API:get_playing_video_state": (data: any) => {
+        if (!data) return
+        if (data.duration !== undefined) _set("playingVideoDuration", data.duration || 0)
+        if (data.time !== undefined) _set("playingVideoTime", data.time || 0)
+        if (data.paused !== undefined) _set("playingVideoPaused", !!data.paused)
+        if (data.loop !== undefined) _set("playingVideoLoop", !!data.loop)
+        if (data.muted !== undefined) _set("playingVideoMuted", data.muted !== false)
+    },
+
+    "API:get_media_loop_state": (data: any) => {
+        _set("playingVideoLoop", data !== false)
+    },
+
+    "API:toggle_media_loop": () => {
+        // Refresh state after toggle
+        send("API:get_playing_video_state")
+    },
 
     "API:get_pdf_thumbnails": (data: { path: string; pages: string[] }) => {
         _update("pdfPages", data.path, data.pages)
@@ -296,7 +436,7 @@ export const receiver = {
         send("SHOW", data.id)
         _set("active", { id: data.id, type: "show" })
         _set("activeTab", "show")
-    },
+    }
 }
 
 function getShowFromItems(items: Item[], nextSlideItems: Item[] | undefined) {
@@ -304,7 +444,7 @@ function getShowFromItems(items: Item[], nextSlideItems: Item[] | undefined) {
         name: "",
         settings: {
             activeLayout: "default",
-            template: null,
+            template: null
         },
         category: null,
         timestamps: { created: 0, modified: null, used: null },
@@ -316,10 +456,10 @@ function getShowFromItems(items: Item[], nextSlideItems: Item[] | undefined) {
                 color: "",
                 settings: {},
                 notes: "",
-                items: items,
-            },
+                items: items
+            }
         },
-        layouts: { default: { name: "", notes: "", slides: [{ id: "one" }] } },
+        layouts: { default: { name: "", notes: "", slides: [{ id: "one" }] } }
     }
 
     if (nextSlideItems) {
@@ -328,7 +468,7 @@ function getShowFromItems(items: Item[], nextSlideItems: Item[] | undefined) {
             color: "",
             settings: {},
             notes: "",
-            items: nextSlideItems,
+            items: nextSlideItems
         }
         show.layouts.default.slides.push({ id: "two" })
     }

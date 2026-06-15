@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte"
-    import { activePopup, activeProject, activeShow, effects, globalTags, outputs, overlays, profiles, projects, selected, showsCache, templates } from "../../../stores"
+    import { activePopup, activeProject, activeShow, editingProjectTemplate, effects, globalTags, outputs, overlays, profiles, projects, projectTemplates, selected, showsCache, templates } from "../../../stores"
     import { history } from "../../helpers/history"
     import { getLayoutRef } from "../../helpers/show"
     import { _show } from "../../helpers/shows"
@@ -22,13 +22,13 @@
             value = _show().slides([ref.id]).get("color")[0] || ""
         } else if (selection.id === "group") {
             value = _show().slides([selection.data[0].id]).get("color")[0] || ""
-        } else if (selection.id === "overlay") value = $overlays[selection.data[0]].color || ""
-        else if (selection.id === "template") value = $templates[selection.data[0]].color || ""
-        else if (selection.id === "effect") value = $effects[selection.data[0]].color || ""
-        else if (selection.id === "output") value = $outputs[selection.data[0].id].color || ""
-        else if (selection.id === "profile") value = $profiles[selection.data[0].id].color || ""
-        else if (selection.id === "tag") value = $globalTags[selection.data[0].id].color || ""
-        else if (selection.id === "show") value = $projects[$activeProject || ""]?.shows?.[selection.data[0].index]?.color || ""
+        } else if (selection.id === "overlay") value = $overlays[selection.data[0]]?.color || ""
+        else if (selection.id === "template") value = $templates[selection.data[0]]?.color || ""
+        else if (selection.id === "effect") value = $effects[selection.data[0]]?.color || ""
+        else if (selection.id === "output") value = $outputs[selection.data[0]?.id]?.color || ""
+        else if (selection.id === "profile") value = $profiles[selection.data[0]?.id]?.color || ""
+        else if (selection.id === "tag") value = $globalTags[selection.data[0]?.id]?.color || ""
+        else if (selection.id === "show") value = ($editingProjectTemplate ? $projectTemplates[$editingProjectTemplate] : $projects[$activeProject || ""])?.shows?.[selection.data[0]?.index]?.color || ""
     })
 
     const actions = {
@@ -40,8 +40,7 @@
                 if (ref.type === "child") ref = ref.parent
 
                 // remove global group if active
-                if ($activeShow && $showsCache[$activeShow.id].slides[ref.id].globalGroup)
-                    history({ id: "UPDATE", newData: { data: null, key: "slides", keys: [ref.id], subkey: "globalGroup" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
+                if ($activeShow && $showsCache[$activeShow.id].slides[ref.id].globalGroup) history({ id: "UPDATE", newData: { data: null, key: "slides", keys: [ref.id], subkey: "globalGroup" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key" } })
 
                 history({ id: "UPDATE", newData: { data: value, key: "slides", keys: [ref.id], subkey: "color" }, oldData: { id: $activeShow?.id }, location: { page: "show", id: "show_key", override: "color" } })
             })
@@ -74,6 +73,7 @@
         profile: () => {
             profiles.update((a) => {
                 selection.data.forEach(({ id }) => {
+                    if (!a[id]) return
                     a[id].color = value
                 })
 
@@ -89,10 +89,17 @@
             })
         },
         show: () => {
-            projects.update((a) => {
-                if (!a[$activeProject || ""]?.shows) return a
+            const projectId = $editingProjectTemplate ? $editingProjectTemplate : $activeProject || ""
 
-                a[$activeProject || ""].shows[selection.data[0].index].color = value
+            ;($editingProjectTemplate ? projectTemplates : projects).update((a) => {
+                if (!a[projectId]) return a
+
+                selection.data.forEach(({ index }) => {
+                    if (!a[projectId]?.shows?.[index]) return
+                    a[projectId].shows[index].color = value
+                })
+
+                a[projectId].modified = Date.now()
                 return a
             })
         }

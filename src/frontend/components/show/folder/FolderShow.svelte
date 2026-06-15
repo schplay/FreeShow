@@ -10,10 +10,10 @@
     import { audioExtensions, imageExtensions, videoExtensions } from "../../../values/extensions"
     import Card from "../../drawer/Card.svelte"
     import MediaLoader from "../../drawer/media/MediaLoader.svelte"
-    import { sortByName } from "../../helpers/array"
+    import { keysToID, sortByName } from "../../helpers/array"
     import Icon from "../../helpers/Icon.svelte"
-    import { getMediaStyle, getMediaType, getVideoDuration } from "../../helpers/media"
-    import { findMatchingOut, getActiveOutputs, setOutput, startFolderTimer } from "../../helpers/output"
+    import { getExtension, getMediaLayerType, getMediaStyle, getMediaType, getVideoDuration } from "../../helpers/media"
+    import { findMatchingOut, getFirstActiveOutput, setOutput, startFolderTimer } from "../../helpers/output"
     import T from "../../helpers/T.svelte"
     import { joinTime, secondsToTime } from "../../helpers/time"
     import FloatingInputs from "../../input/FloatingInputs.svelte"
@@ -31,8 +31,8 @@
     let folderFiles: TFile[] = []
     const mediaExtensions = [...videoExtensions, ...imageExtensions, ...audioExtensions]
     onMount(async () => {
-        const files = await requestMain(Main.READ_FOLDER, { path })
-        folderFiles = sortByName(files.files.filter((a) => mediaExtensions.includes(a.extension)).map((a) => ({ path: a.path, name: a.name, type: getMediaType(a.extension), thumbnail: a.thumbnailPath })))
+        const files = keysToID((await requestMain(Main.READ_FOLDER, { path, generateThumbnails: true })) || {})
+        folderFiles = sortByName(files.filter((a) => mediaExtensions.includes(getExtension(a.name))).map((a) => ({ path: a.path, name: a.name, type: getMediaType(getExtension(a.name)), thumbnail: (a as any).thumbnailPath })))
 
         // get total time
         let total = 0
@@ -43,7 +43,7 @@
         totalTime = Math.ceil(total)
     })
 
-    $: currentOutput = $outputs[getActiveOutputs()[0]]
+    $: currentOutput = getFirstActiveOutput($outputs)
     $: currentStyle = $styles[currentOutput?.style || ""] || {}
 
     function playMedia(file: TFile) {
@@ -64,7 +64,7 @@
 
         const mediaStyle = getMediaStyle($media[file.path], currentStyle)
 
-        let videoType = mediaStyle.videoType || ""
+        let videoType = getMediaLayerType(file.path, mediaStyle)
         let loop = videoType === "foreground" ? false : true
         let muted = videoType === "background" ? true : false
         if (videoType === "foreground") clearSlide()
@@ -81,19 +81,7 @@
     {#if folderFiles.length}
         {#each folderFiles as file}
             {@const outputted = file.type === "audio" ? [AudioPlayer.getPlaying(file.path), $playingAudio][0] : findMatchingOut(file.path, $outputs)}
-            <Card
-                resolution={{ width: 16, height: 9 }}
-                width={25}
-                outlineColor={typeof outputted === "string" ? outputted : null}
-                active={file.type === "audio" ? !!outputted : outputted !== null}
-                label={file.name}
-                title={file.path}
-                icon={file.type === "audio" ? "music" : file.type}
-                white={file.type !== "video"}
-                showPlayOnHover
-                checkered={file.type !== "audio"}
-                on:click={() => playMedia(file)}
-            >
+            <Card resolution={{ width: 16, height: 9 }} width={25} outlineColor={typeof outputted === "string" ? outputted : null} active={file.type === "audio" ? !!outputted : outputted !== null} label={file.name} title={file.path} icon={file.type === "audio" ? "music" : file.type} white={file.type !== "video"} showPlayOnHover checkered={file.type !== "audio"} on:click={() => playMedia(file)}>
                 <!-- icons -->
                 <div class="icons">
                     {#if file.type === "image" && timer}
@@ -163,6 +151,9 @@
 
         height: 100%;
         align-content: start;
+
+        overflow-y: auto;
+        padding-bottom: 60px;
     }
 
     /* icons */

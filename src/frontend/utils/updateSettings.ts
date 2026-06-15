@@ -1,7 +1,8 @@
 import { get } from "svelte/store"
+import { uid } from "uid"
 import { Main } from "../../types/IPC/Main"
 import type { Output } from "../../types/Output"
-import type { Themes } from "../../types/Settings"
+import type { Metadata, Themes } from "../../types/Settings"
 import { clone, keysToID } from "../components/helpers/array"
 import { checkWindowCapture, setOutput, toggleOutputs } from "../components/helpers/output"
 import { defaultThemes } from "../components/settings/tabs/defaultThemes"
@@ -13,6 +14,7 @@ import {
     activeProject,
     alertUpdates,
     audioChannelsData,
+    audioEffects,
     audioFolders,
     audioPlaylists,
     audioStreams,
@@ -20,11 +22,13 @@ import {
     autosave,
     calendarAddShow,
     categories,
+    cloudSyncData,
     companion,
     contentProviderData,
     customMetadata,
     customizedIcons,
     dataPath,
+    deletedDefaults,
     disabledServers,
     drawSettings,
     drawer,
@@ -34,10 +38,10 @@ import {
     effectsLibrary,
     emitters,
     eqPresets,
-    equalizerConfig,
     formatNewShow,
     fullColors,
     gain,
+    globalRegexes,
     globalTags,
     groupNumbers,
     groups,
@@ -50,11 +54,13 @@ import {
     mediaOptions,
     mediaTags,
     metronome,
+    obsData,
     openedFolders,
     os,
     outLocked,
     overlayCategories,
     overlays,
+    playerTags,
     playerVideos,
     ports,
     profiles,
@@ -72,8 +78,10 @@ import {
     theme,
     themes,
     timeFormat,
+    timecode,
+    timeline,
+    timerTags,
     timers,
-    triggers,
     variableTags,
     variables,
     version,
@@ -83,14 +91,17 @@ import {
 } from "../stores"
 import { OUTPUT } from "./../../types/Channels"
 import type { SaveListSettings, SaveListSyncedSettings } from "./../../types/Save"
-import { currentWindow, maxConnections, outputs, scriptureSettings, scriptures, splitLines, transitionData, volume } from "./../stores"
+import { maxConnections, outputs, scriptureSettings, scriptures, splitLines, transitionData, volume } from "./../stores"
 import { checkForUpdates } from "./checkForUpdates"
-import { startAutosave } from "./common"
+import { isMainWindow, startAutosave } from "./common"
 import { setLanguage } from "./language"
 import { send } from "./request"
 
 export function updateSyncedSettings(data: any) {
     if (!data || !Object.keys(data).length) return
+
+    // pre v1.6.1 (triggers are now actions)
+    data = convertTriggersToActions(data)
 
     Object.entries(data).forEach(([key, value]: any) => {
         if (updateList[key as SaveListSyncedSettings]) updateList[key as SaveListSyncedSettings](value)
@@ -103,21 +114,31 @@ export function updateSyncedSettings(data: any) {
 export function updateSettings(data: any) {
     // pre v0.8.2 (data contains SaveListSyncedSettings, but it gets overwritten and removed on first save)
 
+    // pre v1.6.1 (equalizerConfig was not in audioEffects)
+    if (data.equalizerConfig && !data.audioEffects?.main) {
+        data.audioEffects = { main: { equalizer: clone(data.equalizerConfig) } }
+        delete data.equalizerConfig
+    }
+
     Object.entries(data).forEach(([key, value]: any) => {
         if (updateList[key as SaveListSettings]) updateList[key as SaveListSettings](value)
         else console.info("RECEIVED UNKNOWN SETTINGS KEY:", key)
     })
 
-    if (get(currentWindow)) return
+    if (!isMainWindow()) return
 
     // output
     if (data.outputs) {
         // wait until content is loaded
-        setTimeout(() => {
-            restartOutputs()
-            if (get(autoOutput)) setTimeout(() => toggleOutputs(null, { autoStartup: true }), get(os).platform === "darwin" ? 1500 : 500)
-            setTimeout(() => checkWindowCapture(true), get(os).platform === "darwin" ? 2000 : 1000)
-        }, get(os).platform === "darwin" ? 2500 : 1500)
+        setTimeout(
+            () => {
+                restartOutputs()
+                const delay = 1200
+                if (get(autoOutput)) setTimeout(() => toggleOutputs(null, { autoStartup: true }), get(os).platform === "darwin" ? delay + 300 : delay)
+                setTimeout(() => checkWindowCapture(true), get(os).platform === "darwin" ? delay + 300 + 500 : delay + 500)
+            },
+            get(os).platform === "darwin" ? 3500 : 2500
+        )
     }
 
     // remote
@@ -129,7 +150,7 @@ export function updateSettings(data: any) {
 
     // theme
     let currentTheme = get(themes)[data.theme]
-    if (currentTheme) {
+    if (currentTheme?.colors) {
         // update colors (pre 0.9.2 or 1.4.9)
         const pre092 = currentTheme.colors.secondary?.toLowerCase() === "#e6349c"
         const pre149 = currentTheme.colors.primary?.toLowerCase() === "#292c36"
@@ -152,10 +173,47 @@ export function updateSettings(data: any) {
     window.api.send("LOADED")
 }
 
+// pre v1.6.1
+function convertTriggersToActions(data: any) {
+    const triggers: { [key: string]: { name: string; type: "http"; value: string } } = data.triggers || {}
+    if (!Object.keys(triggers).length) return data
+
+    let tagId = "triggertag"
+    if (typeof data.actionTags === "object") {
+        data.actionTags[tagId] = { name: "Triggers", color: "#abb4e6" }
+
+        // update store as this is non-synced settings
+        setTimeout(() => {
+            special.update((a) => {
+                a["actions_grid" + tagId] = true
+                return a
+            })
+        }, 1000)
+    }
+
+    const actions = data.midiIn || {}
+    Object.entries(triggers).forEach(([key, trigger]) => {
+        let emitterId = uid()
+        data.emitters[emitterId] = { name: "Trigger: " + trigger.name, type: "http", signal: { url: trigger.value, method: "GET", contentType: "", payload: "" } }
+        let triggerId = "emit_action:" + uid(5)
+
+        actions[key] = {
+            name: trigger.name,
+            triggers: [triggerId],
+            actionValues: { [triggerId]: { emitter: emitterId } },
+            tags: [tagId]
+        }
+    })
+
+    delete data.triggers
+    data.midiIn = actions
+    return data
+}
+
 let videoDataUpdating = false
 export function restartOutputs(specificId = "") {
-    const data = clone(videosData)
-    const time = clone(videosTime)
+    const data = clone(get(videosData))
+    const time = clone(get(videosTime))
 
     const allOutputs = keysToID(get(outputs))
     const outputIds = specificId ? [specificId] : allOutputs.filter((a) => a.enabled).map(({ id }) => id)
@@ -164,7 +222,6 @@ export function restartOutputs(specificId = "") {
         const output: Output = get(outputs)[id]
         if (!output) return
 
-        // , rate: get(special).previewRate || "auto"
         send(OUTPUT, ["CREATE"], { ...output, id })
     })
 
@@ -181,10 +238,10 @@ export function restartOutputs(specificId = "") {
 }
 
 export function updateThemeValues(themeValues: Themes) {
-    if (!themeValues) return
+    if (!themeValues?.colors) return
 
-    Object.entries(themeValues.colors).forEach(([key, value]) => document.documentElement.style.setProperty("--" + key, value))
-    Object.entries(themeValues.font).forEach(([key, value]) => {
+    Object.entries(themeValues.colors || {}).forEach(([key, value]) => document.documentElement.style.setProperty("--" + key, value))
+    Object.entries(themeValues.font || {}).forEach(([key, value]) => {
         if (key === "family" && (!value || value === "sans-serif")) value = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif'
         document.documentElement.style.setProperty("--font-" + key, value)
     })
@@ -254,7 +311,21 @@ const updateList: { [key in SaveListSettings | SaveListSyncedSettings]: any } = 
         outputs.set(v)
     },
     sorted: (v: any) => sorted.set(v),
-    styles: (v: any) => styles.set(v),
+    styles: (v: any) => {
+        // convert settings (<= v1.5.7)
+        Object.values(v).forEach((style: any) => {
+            const metadata: Metadata = {}
+            if (style.displayMetadata) metadata.display = style.displayMetadata
+            if (style.metadataTemplate) metadata.template = style.metadataTemplate
+            if (Object.keys(metadata).length) style.metadata = metadata
+            delete style.metadataDivider
+            delete style.displayMetadata
+            delete style.metadataTemplate
+            delete style.messageTemplate
+        })
+
+        styles.set(v)
+    },
     profiles: (v: any) => profiles.set(v),
     remotePassword: (v: any) => remotePassword.set(v),
     audioFolders: (v: any) => audioFolders.set(v),
@@ -281,7 +352,6 @@ const updateList: { [key in SaveListSettings | SaveListSyncedSettings]: any } = 
     templateCategories: (v: any) => templateCategories.set(v),
     timers: (v: any) => timers.set(v),
     variables: (v: any) => variables.set(v),
-    triggers: (v: any) => triggers.set(v),
     audioStreams: (v: any) => audioStreams.set(v),
     audioPlaylists: (v: any) => audioPlaylists.set(v),
     theme: (v: any) => theme.set(v),
@@ -293,16 +363,20 @@ const updateList: { [key in SaveListSettings | SaveListSyncedSettings]: any } = 
     midiIn: (v: any) => actions.set(v),
     videoMarkers: (v: any) => videoMarkers.set(v),
     mediaTags: (v: any) => mediaTags.set(v),
+    playerTags: (v: any) => playerTags.set(v),
     actionTags: (v: any) => actionTags.set(v),
     variableTags: (v: any) => variableTags.set(v),
+    timerTags: (v: any) => timerTags.set(v),
     customizedIcons: (v: any) => customizedIcons.set(v),
+    cloudSyncData: (v: any) => cloudSyncData.set(v),
     driveData: (v: any) => driveData.set(v),
     calendarAddShow: (v: any) => calendarAddShow.set(v),
     metronome: (v: any) => metronome.set(v),
-    equalizerConfig: (v: any) => equalizerConfig.set(v),
+    audioEffects: (v: any) => audioEffects.set(v),
     eqPresets: (v: any) => eqPresets.set(v),
     effectsLibrary: (v: any) => effectsLibrary.set(v),
     globalTags: (v: any) => globalTags.set(v),
+    globalRegexes: (v: any) => globalRegexes.set(v),
     customMetadata: (v: any) => customMetadata.set(v),
     companion: (v: any) => {
         companion.set(v)
@@ -334,12 +408,32 @@ const updateList: { [key in SaveListSettings | SaveListSyncedSettings]: any } = 
         // DEPRECATED (migrate)
         v.customUserDataLocation = true
 
+        // DEPRECATED (migrate)
+        let deletedDefaultsValue = get(deletedDefaults)
+        if (v.deletedTemplates) {
+            deletedDefaultsValue.templates = v.deletedTemplates
+            delete v.deletedTemplates
+        }
+        if (v.deletedOverlays) {
+            deletedDefaultsValue.overlays = v.deletedOverlays
+            delete v.deletedOverlays
+        }
+        if (v.deletedEffects) {
+            deletedDefaultsValue.effects = v.deletedEffects
+            delete v.deletedEffects
+        }
+        if (Object.keys(deletedDefaultsValue).length) deletedDefaults.set(deletedDefaultsValue)
+
         special.set(v)
     },
+    timeline: (v: any) => timeline.set(v),
+    timecode: (v: any) => timecode.set(v),
     // @ts-ignore - DEPERACTED (migrate)
     chumsSyncCategories: (v: any) => {
         if (v?.length > 1) contentProviderData.set({ ...get(contentProviderData), churchApps: { syncCategories: v } })
     },
     contentProviderData: (v: any) => contentProviderData.set(v),
-    effects: (a: any) => effects.set(a)
+    obsData: (v: any) => obsData.set(v),
+    effects: (a: any) => effects.set(a),
+    deletedDefaults: (a: any) => deletedDefaults.set({ ...get(deletedDefaults), ...a })
 }

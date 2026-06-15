@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { activePopup, groupNumbers, groups, groupsMoreOptionsEnabled, templates } from "../../../stores"
+    import { activePopup, groupNumbers, groups, groupsMoreOptionsEnabled, special, templates } from "../../../stores"
+    import { newToast } from "../../../utils/common"
     import { translateText } from "../../../utils/language"
     import T from "../../helpers/T.svelte"
     import { clone, sortByName } from "../../helpers/array"
@@ -29,6 +30,11 @@
         // if (value === "—") value = ""
 
         history({ id: "UPDATE", newData: { key, data: value }, oldData: { id: id }, location: { page: "none", id: "global_group", override: "group_" + key } })
+
+        // if name ends with space and a single digit, alert that numbers are auto assigned
+        if (key === "name" && $groupNumbers && /\s\d$/.test(value)) {
+            newToast("tips.group_numbers")
+        }
     }
 
     const defaultGroups = {
@@ -53,6 +59,13 @@
         // value.group = ""
     }
 
+    function updateSpecial(key: string, value: any) {
+        special.update((a) => {
+            a[key] = value
+            return a
+        })
+    }
+
     function reset() {
         groups.set(clone(defaultGroups))
         groupNumbers.set(true)
@@ -69,7 +82,8 @@
 
 <div style="min-width: calc(100vw - var(--navigation-width) * 2 - 51px);">
     {#if showMore}
-        <MaterialToggleSwitch style="margin-bottom: 10px;" label="settings.auto_group_numbers" checked={$groupNumbers} defaultValue={true} on:change={(e) => groupNumbers.set(e.detail)} />
+        <MaterialToggleSwitch label="settings.auto_group_numbers" checked={$groupNumbers} defaultValue={true} on:change={(e) => groupNumbers.set(e.detail)} />
+        <MaterialToggleSwitch style="margin-bottom: 10px;" label="settings.shortcuts_on_slides" checked={$special.groupShortcutPreview} defaultValue={false} on:change={(e) => updateSpecial("groupShortcutPreview", e.detail)} />
     {/if}
 
     {#if g.length}
@@ -82,7 +96,7 @@
                     style="width: 28%;"
                     id={group.id}
                     value={group.shortcut}
-                    name={(group.shortcut || "").toUpperCase()}
+                    name={typeof group.shortcut === "string" ? group.shortcut.toUpperCase() : ""}
                     icon="shortcut"
                     popupId="assign_shortcut"
                     data={{

@@ -4,8 +4,10 @@
     import Icon from "../helpers/Icon.svelte"
     import MaterialButton from "./MaterialButton.svelte"
     import { dictionary } from "../../stores"
+    import { pasteText } from "../helpers/caretHelper"
 
     export let value: string
+    export let type = "text"
     export let defaultValue: string | null = null
     export let autofill = ""
     export let label: string
@@ -18,6 +20,7 @@
     export let disabled = false
     export let autofocus = false
     export let autoselect = false
+    export let pasteBtn = false
 
     const dispatch = createEventDispatcher()
 
@@ -69,12 +72,18 @@
         updateValue(resetFromValue)
         resetFromValue = null
     }
+
+    let showText = false
 </script>
 
 <div class="textfield {center ? 'centered' : ''} {disabled ? 'disabled' : ''}" data-title={translateText(title)} style={$$props.style || null}>
     <div class="background" />
 
-    <input bind:value type="text" {id} {placeholder} {disabled} {autofocus} use:select use:blurOnEnter class="input edit" on:input={input} on:change={change} on:keydown />
+    {#if type === "password" && !showText}
+        <input bind:value type="password" {id} {placeholder} {disabled} {autofocus} use:select use:blurOnEnter class="input edit" on:input={input} on:change={change} on:keydown />
+    {:else}
+        <input bind:value type="text" {id} {placeholder} {disabled} {autofocus} use:select use:blurOnEnter class="input edit" on:input={input} on:change={change} on:keydown />
+    {/if}
 
     <label for={id}>{@html translateText(label, $dictionary)}</label>
 
@@ -98,6 +107,36 @@
                     <Icon id="undo" white />
                 </MaterialButton>
             {/if}
+        </div>
+    {/if}
+
+    {#if type === "password" && !pasteBtn}
+        <div class="remove">
+            <MaterialButton
+                on:click={(e) => {
+                    showText = !showText
+                    const input = e.detail.target?.closest(".textfield")?.querySelector("input")
+                    if (input) input.focus()
+                }}
+                title={showText ? "" : ""}
+                white
+            >
+                <Icon id={showText ? "eye" : "hide"} white />
+            </MaterialButton>
+        </div>
+    {:else if pasteBtn && !disabled}
+        <div class="remove">
+            <MaterialButton
+                on:click={(e) => {
+                    const textInput = e.detail.target?.closest(".textfield")?.querySelector("input")
+                    pasteText(textInput)
+                    if (textInput) textInput.focus()
+                }}
+                title="actions.paste"
+                white
+            >
+                <Icon id="paste" white />
+            </MaterialButton>
         </div>
     {/if}
 </div>

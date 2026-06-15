@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { createEventDispatcher } from "svelte"
-    import { actions, activeEdit, activeStage, outputs, timers } from "../../../stores"
+    import { createEventDispatcher, onDestroy } from "svelte"
+    import { actions, activeEdit, activePage, activeStage, outputs, special, timers } from "../../../stores"
     import { throttle } from "../../../utils/common"
     import { translateText } from "../../../utils/language"
     import { mediaExtensions } from "../../../values/extensions"
@@ -15,9 +15,12 @@
     import MaterialFontDropdown from "../../inputs/MaterialFontDropdown.svelte"
     import MaterialPopupButton from "../../inputs/MaterialPopupButton.svelte"
     import MaterialTextarea from "../../inputs/MaterialTextarea.svelte"
+    import { getIsoLanguages } from "../../main/popups/localization/translation"
+    import { SlideTimeline } from "../../timeline/SlideTimeline"
     import { parseShadowValue } from "../scripts/edit"
     import { filterItemStyle, mergeWithStyle } from "../scripts/itemClipboard"
     import type { EditBoxSection, EditInput2 } from "../values/boxes"
+    import { captionTranslateLanguages } from "../values/captionLanguages"
     import { sectionColors } from "../values/item"
 
     export let sections: { [key: string]: EditBoxSection } = {}
@@ -25,6 +28,7 @@
     export let customValues: { [key: string]: string } = {}
     export let item: any = {}
     export let isStage = false
+    export let type: string = ""
 
     function getValue(input: EditInput2, _updater: any = null) {
         if (!item) return ""
@@ -65,7 +69,7 @@
         if (input.multiplier) value *= input.multiplier
 
         // pre 1.5.0 dropdowns
-        if (input.type === "fontDropdown") value = value.replaceAll("'", "")
+        if (input.type === "fontDropdown" && typeof value === "string") value = value.replaceAll("'", "")
 
         return value
     }
@@ -108,10 +112,30 @@
     }
 
     const dispatch = createEventDispatcher()
-    function changed(e: any, input: any, sectionId = "") {
+    let lastChanged = { value: "", key: "" }
+    function changed(e: any, input: any, sectionId = "", onlyTimeline = false) {
         let value = e.detail
 
-        if (input.multiplier) value = value / input.multiplier
+        if (input.multiplier) {
+            if (!value || isNaN(Number(value))) value = input.value || 0
+            value = value / input.multiplier
+        }
+
+        // update on change (if another keyframe of same key exists)
+        if ($special.slideTimelineActive && $activePage === "edit" && ($activeEdit.type || "show") === "show" && (onlyTimeline || SlideTimeline.hasActionWithKey(input.key || "", type))) {
+            let timelineValue = value
+
+            if (!onlyTimeline && lastChanged.key === input.key && lastChanged.value === value) return
+            lastChanged = { key: input.key, value }
+
+            if (input.key === "width" || input.key === "left") timelineValue = 1920 * (timelineValue / 100)
+            if (input.key === "height" || input.key === "top") timelineValue = 1080 * (timelineValue / 100)
+
+            const indexes = $activeEdit?.items?.length ? $activeEdit.items : [0]
+            SlideTimeline.addKeyframe({ name: input.values?.label, key: input.key, value: timelineValue, type, indexes }, onlyTimeline)
+            if (onlyTimeline) return
+        }
+
         if (input.extension) value += input.extension
 
         if (input.valueIndex !== undefined) {
@@ -244,17 +268,18 @@
 
     ///
 
-    const optionsLists = {
+    $: optionsLists = {
         timers: getSortedTimers($timers, { showHours: item?.timer?.showHours !== false, firstActive: isStage }).map((a) => ({ value: a.id, label: a.name, data: a.extraInfo })),
         actions: sortByName(keysToID($actions)).map((a) => ({ value: a.id, label: a.name || "" })),
-        outputWindows: sortByName(keysToID($outputs).filter((a) => a.stageOutput !== $activeStage.id)).map((a) => ({ value: a.id, label: a.name || "" }))
+        outputWindows: sortByName(keysToID($outputs).filter((a) => a.stageOutput !== $activeStage.id)).map((a) => ({ value: a.id, label: a.name || "" })),
+        captionTranslateLanguages: item?.captions?.googlekey ? [{ value: "", label: "—" }, ...getIsoLanguages()] : captionTranslateLanguages.map((a) => ({ value: a.id, label: a.name }))
     }
     function getOptions(options: string | any[]): any[] {
         if (typeof options === "string") return optionsLists[options] || []
         return options
     }
 
-    function getValues(input: any) {
+    function getValues(input: any, _optionsLists?: any) {
         const values = clone(input.values)
         if (input.type === "dropdown") {
             if (values.options === "timers") values.addNew = "new.timer"
@@ -262,6 +287,11 @@
         }
         return values
     }
+
+    // TIMELINE Updater
+    let timelineUpdater = 0
+    const updaterInterval = setInterval(() => timelineUpdater++, 100)
+    onDestroy(() => clearInterval(updaterInterval))
 </script>
 
 <div class="tools">
@@ -301,18 +331,11 @@
                         {#each inputRow as input}
                             {#if !input.hidden}
                                 {@const value = getValue(input, { styles, item })}
-                                {@const values = getValues(input)}
+                                {@const values = getValues(input, optionsLists)}
+                                {@const hasTimelineAction = $special.slideTimelineActive && $activePage === "edit" && ($activeEdit.type || "show") === "show" && SlideTimeline.hasActionAtTime(input.key || "", type, $activeEdit?.items?.length ? $activeEdit.items : [0], timelineUpdater)}
 
                                 {#if input.type === "fontDropdown"}
-                                    <MaterialFontDropdown
-                                        label={values.label}
-                                        {value}
-                                        style={values.style}
-                                        fontStyleValue={input.styleValue}
-                                        on:change={(e) => changed(e, input)}
-                                        on:fontStyle={(e) => changed(e, { ...input, key: "font" })}
-                                        enableFontStyles
-                                    />
+                                    <MaterialFontDropdown label={values.label} {value} style={values.style} fontStyleValue={input.styleValue} on:change={(e) => changed(e, input)} on:fontStyle={(e) => changed(e, { ...input, key: "font" })} enableFontStyles />
                                 {:else if input.type === "toggle"}
                                     <MaterialButton style="min-width: 50px;flex: 1;" title={values.label} on:click={() => toggle(input)}>
                                         <Icon id={values.icon} size={1.2} white />
@@ -326,14 +349,7 @@
                                 {:else if input.type === "textarea"}
                                     <MaterialTextarea label={values.label} {value} on:change={(e) => changed(e, input, id)} />
                                 {:else if input.type === "media"}
-                                    <MaterialFilePicker
-                                        label={(value ? values.label : "") || "edit.choose_media"}
-                                        {value}
-                                        filter={{ name: "Media files", extensions: mediaExtensions }}
-                                        on:change={(e) => changed(e, input, id)}
-                                        autoTrigger={$activeEdit.type !== "template"}
-                                        allowEmpty
-                                    />
+                                    <MaterialFilePicker label={(value ? values.label : "") || "edit.choose_media"} {value} filter={{ name: "Media files", extensions: mediaExtensions }} on:change={(e) => changed(e, input, id)} autoTrigger={$activeEdit.type !== "template"} allowEmpty />
                                 {:else if input.type === "popup"}
                                     <MaterialPopupButton {...values} {value} on:change={(e) => changed(e, input, id)} allowEmpty />
                                 {:else if input.type === "tip"}
@@ -343,7 +359,7 @@
                                         {#if input.values?.subtext.includes("<a href=")}<Icon id="launch" white />{/if}
                                     </p>
                                 {:else}
-                                    <Input input={{ type: input.type, ...values, value }} on:change={(e) => changed(e, input, id)} />
+                                    <Input input={{ type: input.type, ...values, value }} {hasTimelineAction} on:change={(e) => changed(e, input, id)} on:keyframe={(e) => changed(e, input, id, true)} />
                                 {/if}
                             {/if}
                         {/each}

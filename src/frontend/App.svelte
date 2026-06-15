@@ -8,10 +8,12 @@
     import { getBlending } from "./components/helpers/output"
     import { checkTimers, startEventTimer, startTimer } from "./components/helpers/timerTick"
     import Loader from "./components/main/Loader.svelte"
+    import ProgressPanel from "./components/main/ProgressPanel.svelte"
     import MenuBar from "./components/main/MenuBar.svelte"
     import Popup from "./components/main/Popup.svelte"
     import ProfileSelector from "./components/main/ProfileSelector.svelte"
     import Recorder from "./components/main/Recorder.svelte"
+    import StatusIndicator from "./components/main/StatusIndicator.svelte"
     import Toast from "./components/main/Toast.svelte"
     import TooltipManager from "./components/main/TooltipManager.svelte"
     import QuickSearch from "./components/quicksearch/QuickSearch.svelte"
@@ -51,6 +53,15 @@
     $: contrastColor = getContrast($themes[$theme]?.colors?.secondary || "")
     $: secondaryContrast = `--secondary-text: ${contrastColor === "#000000" ? "#131313" : "#f0f0ff"};`
     $: globalStyle = `${isWindows ? "height: calc(100% - 25px);" : ""}${secondaryContrast}${blending}`
+
+    let ready = false
+    $: if ($loaded) hasLoaded()
+    function hasLoaded() {
+        setTimeout(() => {
+            // prevent brief flash
+            ready = true
+        }, 51)
+    }
 </script>
 
 <svelte:window on:keydown={keydown} on:mousedown={focusArea} on:click={mainClick} on:error={logerror} on:unhandledrejection={logerror} />
@@ -69,17 +80,20 @@
 
         {#if $currentWindow === "output"}
             <MainOutput />
-        {:else if $loaded && Object.keys($profiles).length && $activeProfile === null}
-            <Popup />
-            <ProfileSelector />
         {:else if $loaded}
             <Popup />
             <QuickSearch />
             <Toast />
+            <StatusIndicator />
             <Recorder />
             <Guide />
+            <ProgressPanel />
 
             <MainLayout />
+
+            {#if ready && Object.keys($profiles).filter((a) => a !== "admin").length && $activeProfile === null}
+                <ProfileSelector />
+            {/if}
         {:else}
             <Center>
                 <Loader size={2} />

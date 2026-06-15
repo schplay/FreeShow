@@ -34,7 +34,7 @@
 
     // UPDATE
 
-    function changeTransition(id: TransitionTypes, key: "type" | "duration" | "easing" | "custom", value: any, reset = false) {
+    function changeTransition(id: TransitionTypes, key: "type" | "duration" | "easing" | "fadeInOffset" | "custom", value: any, reset = false) {
         if (key === "duration") value = Number(value)
 
         if ($popupData.trigger) {
@@ -58,6 +58,7 @@
                 slideItems[i].actions.transition = value
             })
 
+            if (indexes.some((i) => !slideItems[i])) return
             let actions = indexes.map((i) => slideItems[i].actions)
 
             if ($activeEdit.type === "overlay" || $activeEdit.type === "template") {
@@ -85,7 +86,7 @@
             else slideMediaTransition = value
 
             let globalValues = $transitionData[id]
-            if (value.type === globalValues.type && value.duration === globalValues.duration && value.easing === globalValues.easing && !specificScenatios.find((a) => value[a])) value = null
+            if (value.type === globalValues.type && value.duration === globalValues.duration && value.easing === globalValues.easing && !specificScenatios.find((a) => value[a])) value = undefined
 
             let type = id === "text" ? "transition" : "mediaTransition"
             let indexes = $selected.data.map((a) => a.index)
@@ -111,7 +112,7 @@
 
     // let updated: string[] = []
     // let updatedTimeout: NodeJS.Timeout | null = null
-    function updateSpecific(data: Transition, key: "type" | "duration" | "easing" | "custom", value: any, reset = false) {
+    function updateSpecific(data: Transition, key: "type" | "duration" | "easing" | "fadeInOffset" | "custom", value: any, reset = false) {
         if (!enableSpecific) {
             return { ...data, [key]: value }
         }
@@ -175,7 +176,7 @@
     if (isItem) {
         if ($activeEdit.type === "overlay") slideItems = $overlays[$activeEdit.id || ""]?.items || []
         else if ($activeEdit.type === "template") slideItems = $templates[$activeEdit.id || ""]?.items || []
-        else slideItems = _show().get("slides")[slideRef.id]?.items || []
+        else slideItems = _show().get("slides")?.[slideRef.id]?.items || []
     }
     let firstItem = slideItems[$activeEdit.items[0]] || {}
     $: slideItemTransition = isItem ? clone(firstItem.actions?.transition || $transitionData.text || clone(DEFAULT_TRANSITIONS.text)) : {}
@@ -266,6 +267,19 @@
         { value: "top_bottom", label: translateText("edit.top_bottom") }
     ]
 
+    $: slideDirection = currentTransition.custom?.direction || slideTypes[0].value
+    const getCorrectedDirection = (value: string, _updater: any = null) => {
+        // Svelte uses the inverse of the In for the out, so it makes sense to invert this
+        if (selectedSpecific === "out") {
+            if (value === "left_right") return "right_left"
+            if (value === "right_left") return "left_right"
+            if (value === "bottom_top") return "top_bottom"
+            if (value === "top_bottom") return "bottom_top"
+        }
+        return value
+    }
+    $: correctedSlideDirection = getCorrectedDirection(slideDirection, selectedSpecific)
+
     let showMore = false
 </script>
 
@@ -305,13 +319,7 @@
 </div>
 
 {#if currentTransition.type === "slide"}
-    <MaterialDropdown
-        label="transition.direction"
-        style="margin-bottom: 10px;"
-        options={slideTypes}
-        value={currentTransition.custom?.direction || slideTypes[0].value}
-        on:change={(e) => changeTransition(selectedType, "custom", { ...(currentTransition.custom || {}), direction: e.detail })}
-    />
+    <MaterialDropdown label="transition.direction" style="margin-bottom: 10px;" options={slideTypes} value={correctedSlideDirection} on:change={(e) => changeTransition(selectedType, "custom", { ...(currentTransition.custom || {}), direction: getCorrectedDirection(e.detail) })} />
 {/if}
 
 <InputRow>
@@ -320,6 +328,10 @@
     <!-- defaultValue="sine" -->
     <MaterialDropdown label="transition.easing" disabled={isDisabled} options={easings.map((a) => ({ ...a, label: translateText(a.label) }))} value={easingValue} on:change={(e) => changeTransition(selectedType, "easing", e.detail)} />
 </InputRow>
+
+{#if showMore && selectedType === "text"}
+    <MaterialNumberInput label="transition.fade_in_offset (%)" disabled={isDisabled} value={currentTransition?.fadeInOffset ?? 50} defaultValue={50} max={100} step={10} on:change={(e) => changeTransition(selectedType, "fadeInOffset", e.detail)} />
+{/if}
 
 <style>
     .types {

@@ -69,13 +69,16 @@ export const defaultSettings: { [key in SaveListSettings]: any } = {
     volume: 1,
     gain: 1,
     audioChannelsData: {},
+    cloudSyncData: {},
     driveData: { mainFolderId: null, disabled: false, initializeMethod: null, disableUpload: false },
     calendarAddShow: "",
     metronome: {},
-    equalizerConfig: { enabled: false, bands: [] },
+    audioEffects: {},
     eqPresets: {},
     effectsLibrary: [],
     special: {},
+    timeline: {},
+    timecode: {},
     contentProviderData: {
         planningcenter: {
             localAlways: false
@@ -84,6 +87,7 @@ export const defaultSettings: { [key in SaveListSettings]: any } = {
             syncCategories: ["song"]
         }
     },
+    obsData: {}
 }
 
 export const defaultSyncedSettings: { [key in SaveListSyncedSettings]: any } = {
@@ -110,7 +114,6 @@ export const defaultSyncedSettings: { [key in SaveListSyncedSettings]: any } = {
     variables: {
         default: { name: "Counter", type: "number" }
     },
-    triggers: {},
     audioStreams: {},
     audioPlaylists: {},
     scriptures: {
@@ -133,7 +136,7 @@ export const defaultSyncedSettings: { [key in SaveListSyncedSettings]: any } = {
     scriptureSettings: {
         template: "scripture",
         versesPerSlide: 3,
-        verseNumbers: false,
+        verseNumbers: true,
         showVersion: false,
         showVerse: true,
         referenceDivider: ":"
@@ -151,11 +154,15 @@ export const defaultSyncedSettings: { [key in SaveListSyncedSettings]: any } = {
     },
     videoMarkers: {},
     mediaTags: {},
+    playerTags: {},
     actionTags: {},
     variableTags: {},
+    timerTags: {},
     customizedIcons: { disabled: [], svg: [] },
     companion: {},
     globalTags: {},
+    globalRegexes: {},
     customMetadata: { disabled: [], custom: [] },
-    effects: {}
+    effects: {},
+    deletedDefaults: {}
 }

@@ -8,6 +8,7 @@ import { history } from "../components/helpers/history"
 import { checkName, getCustomMetadata, getLabelId } from "../components/helpers/show"
 import { _show } from "../components/helpers/shows"
 import { linesToTextboxes } from "../components/show/formatTextEditor"
+import { VIRTUAL_BREAK_CHAR } from "../show/slides"
 import { activePopup, activeProject, activeShow, alertMessage, dictionary, drawerTabsData, formatNewShow, groupNumbers, groups, special, splitLines } from "../stores"
 import { translateText } from "../utils/language"
 import { setTempShows } from "./importHelpers"
@@ -71,13 +72,13 @@ export function convertText({ name = "", origin = "", category = null, text, noF
             }
 
             const meta = line.split("=")
-            const metaKey = meta[0].toLowerCase().replaceAll(" ", "")
+            const metaKey = meta[0]?.toString().toLowerCase().replaceAll(" ", "").trim() || ""
             if (metaKey === "notes") {
                 plainNotes = meta[1]
                 return
             }
 
-            const metadataKey = Object.keys(metadataKeys).find((key) => key.toLowerCase().replaceAll(" ", "") === metaKey || translateText("meta." + key).toLowerCase() === metaKey)
+            const metadataKey = Object.keys(metadataKeys).find((key) => key.toLowerCase().replaceAll(" ", "").trim() === metaKey || translateText("meta." + key).toLowerCase() === metaKey)
             if (!metadataKey) {
                 // create slide with unknown metadata
                 // newLines.push(line)
@@ -94,7 +95,7 @@ export function convertText({ name = "", origin = "", category = null, text, noF
 
     // get ccli
     let ccli = ""
-    if (!Object.keys(plainTextMetadata).length && sections[sections.length - 1].includes("www.ccli.com")) {
+    if (!Object.keys(plainTextMetadata).length && sections[sections.length - 1]?.includes("www.ccli.com")) {
         ccli = sections.pop()!
     }
 
@@ -103,10 +104,10 @@ export function convertText({ name = "", origin = "", category = null, text, noF
     // find chorus phrase
     const patterns = findPatterns(sections)
     sections = patterns.sections
-    labeled = patterns.indexes.map((a, i) => ({ type: a, text: sections[i] }))
+    labeled = patterns.indexes.map((a, i) => ({ type: a, text: sections[i] || "" }))
     labeled = checkRepeats(labeled)
 
-    if (!name) name = plainTextMetadata.title || trimNameFromString(labeled[0].text)
+    if (!name) name = plainTextMetadata.title || trimNameFromString(labeled[0]?.text)
 
     const layoutID: string = uid()
     const show: Show = new ShowObj(false, category, layoutID)
@@ -213,10 +214,6 @@ function preprocessLines(lines: string[]): string[] {
         if (isSectionHeader) {
             output.push(currentLine)
             i++
-            // Skip any empty lines after the section header
-            while (i < lines.length && lines[i].trim() === "") {
-                i++
-            }
             continue
         }
 
@@ -252,41 +249,44 @@ function insertChordsIntoLyrics(chordLine: string, lyricLine: string): string {
     const chords: { chord: string; position: number }[] = []
     let match: RegExpExecArray | null
 
+    // Only allow chord positions within the lyric line length
     while ((match = chordRegex.exec(chordLine)) !== null) {
-        // Adjust chord position to attach to words instead of spaces
-        let position = match.index
+        // Ignore if the chord name is longer than 12 characters or contains spaces
+        if (match[0].length > 12 || /\s/.test(match[0])) continue
 
+        let position = match.index
         // If chord position is at a space, move it to the next word
         if (position < lyricLine.length && lyricLine[position] === " ") {
-            // Find the next non-space character
             while (position < lyricLine.length && lyricLine[position] === " ") {
                 position++
             }
         }
 
-        chords.push({
-            chord: match[0],
-            position
-        })
+        // Prevent runaway: only allow chord insertions up to lyricLine.length + 2
+        if (position > lyricLine.length + 2) continue
+
+        chords.push({ chord: match[0], position })
     }
 
     if (chords.length === 0) return lyricLine
 
     let result = ""
     let chordIdx = 0
-    const maxLen = Math.max(chordLine.length, lyricLine.length)
-
-    for (let pos = 0; pos < maxLen; pos++) {
+    // Only iterate up to the lyric line length
+    for (let pos = 0; pos < lyricLine.length; pos++) {
         // Insert chord if it starts at this position
-        if (chordIdx < chords.length && chords[chordIdx].position === pos) {
+        while (chordIdx < chords.length && chords[chordIdx].position === pos) {
             result += `[${chords[chordIdx].chord}]`
             chordIdx++
         }
-
         // Add lyric character at this position
-        if (pos < lyricLine.length) {
-            result += lyricLine[pos]
-        }
+        result += lyricLine[pos]
+    }
+
+    // If any chords remain that are positioned at or after the end, append them at the end
+    while (chordIdx < chords.length && chords[chordIdx].position >= lyricLine.length && chords[chordIdx].position <= lyricLine.length + 2) {
+        result += `[${chords[chordIdx].chord}]`
+        chordIdx++
     }
 
     return result
@@ -304,12 +304,25 @@ function createSlides(labeled: { type: string; text: string }[], noFormatting) {
 
     // add children
     Object.entries(addedChildren).forEach(([parentId, children]) => {
-        slides[parentId].children = [...(slides[parentId].children || []), ...(children || [])]
+        if (!slides[parentId]) return
+        slides[parentId].children = [...(slides[parentId]?.children || []), ...(children || [])]
     })
 
     return removeSlideDuplicates(slides, layouts)
 
     function convertLabeledSlides(a: { type: string; text: string }): void {
+        const trimmed = a.text.trim().toLowerCase()
+        const bracketHeader = `[${a.type.toLowerCase()}]`
+        const colonHeader = `${a.type.toLowerCase()}:`
+        if (trimmed === bracketHeader || trimmed === colonHeader) {
+            const id = uid()
+            const slide: Slide = { group: a.type, color: null, settings: {}, notes: "", items: [] }
+            slides[id] = slide
+            layouts.push({ id })
+            activeGroup = null
+            return
+        }
+
         let id = ""
         const formatText: boolean = noFormatting ? false : get(formatNewShow)
         const autoGroups: boolean = get(special).autoGroups !== false
@@ -342,9 +355,9 @@ function createSlides(labeled: { type: string; text: string }[], noFormatting) {
         // split slide notes from text ("---")
         const slideTextAndNotes = slideText.split("---")
 
-        while (new Set(slideTextAndNotes[0].split("")).size === 1 && slideTextAndNotes[0][0] === "-") slideTextAndNotes.shift()
-        let allLines: string[] = [slideTextAndNotes.shift() || ""]
-        if (allLines[0].endsWith("\n")) allLines[0] = allLines[0].slice(0, -1)
+        while (slideTextAndNotes[0] && new Set(slideTextAndNotes[0].split("")).size === 1 && slideTextAndNotes[0][0] === "-") slideTextAndNotes.shift()
+        let allLines: string[] = [slideTextAndNotes.length > 0 ? slideTextAndNotes.shift() || "" : ""]
+        if (allLines[0] && allLines[0].endsWith("\n")) allLines[0] = allLines[0].slice(0, -1)
 
         while (slideTextAndNotes[0] === "") slideTextAndNotes.shift()
         const slideNotes = slideTextAndNotes.join("\n").slice(1)
@@ -367,6 +380,7 @@ function createSlides(labeled: { type: string; text: string }[], noFormatting) {
             if (!addedChildren[activeGroup.id]) addedChildren[activeGroup.id] = []
             addedChildren[activeGroup.id].push(...[id, ...children])
         } else {
+            if (!slides[id]) return
             if (children.length) slides[id].children = children
 
             layouts.push({ id })
@@ -384,8 +398,10 @@ function createSlides(labeled: { type: string; text: string }[], noFormatting) {
                 items = items
                     // .filter((a) => !a.type || a.type === "text" || a.lines)
                     .map((item) => {
-                        item.lines?.forEach((_, index) => {
-                            item.lines![index].text[0].style = activeItems?.[0]?.lines?.[0]?.text?.[0]?.style || ""
+                        item.lines?.forEach((line) => {
+                            if (line.text?.[0]) {
+                                line.text[0].style = activeItems?.[0]?.lines?.[0]?.text?.[0]?.style || ""
+                            }
                         })
                         return item
                     })
@@ -406,6 +422,17 @@ function createSlides(labeled: { type: string; text: string }[], noFormatting) {
                         let newValue = ""
                         text.value?.split("").forEach((char) => {
                             if ((char === "[" || char === "]") && !text.value.slice(0, -2).includes(":")) {
+                                if (char === "]" && isChord && chords.length > 0) {
+                                    // Check if this is a virtual break marker, not a chord
+                                    if (chords[chords.length - 1].key === "_VB") {
+                                        // Remove the virtual break from chords array and add it to text
+                                        chords.pop()
+                                        newValue += VIRTUAL_BREAK_CHAR
+                                        isChord = false
+                                        return
+                                    }
+                                }
+
                                 isChord = char === "["
                                 if (isChord) chords.push({ id: uid(5), pos: letterIndex, key: "" })
                                 return
@@ -455,6 +482,11 @@ function removeSlideDuplicates(slides: { [key: string]: Slide }, layouts: SlideD
         if (slide.group === null) return
 
         let text = getSlideText(slide)
+        // Include Group ID in the cache key to differentiate slides with identical text but different groups (e.g., key changes)
+        text += `_GROUPID_${slide.group}`
+
+        // for empty slides, include group label in deduplication key
+        if (!text.trim()) text = `EMPTY_${slide.group}`
         text += slide.children?.reduce((value, childId) => (value += getSlideText(slides[childId])), "") || ""
 
         const exists = Object.keys(slideTextCache).find((id) => slideTextCache[id] === text)
@@ -490,14 +522,20 @@ function linesToItems(lines: string) {
 function checkRepeats(labeled: { type: string; text: string }[]) {
     const newLabels: { type: string; text: string }[] = []
     labeled.forEach((a) => {
-        const match = a.text.match(/\nx[0-9]/)
+        const match = a.text.match(/\nx[0-9]+/)
         if (match !== null && match.index !== undefined) {
-            const repeatNumber = a.text.slice(match.index + 2, match.index + 4).replace(/[A-Z]/gi, "")
-            // remove
-            a.text = a.text.slice(0, match.index + 1) + a.text.slice(match.index + match[0].length + 1, a.text.length)
-                ;[...Array(Number(repeatNumber))].map(() => {
-                    newLabels.push(a)
-                })
+            const repeatNumber = parseInt(match[0].slice(2))
+
+            if (!isNaN(repeatNumber) && repeatNumber > 0 && repeatNumber < 10) {
+                // remove original repeat marker from text
+                a.text = a.text.slice(0, match.index + 1) + a.text.slice(match.index + match[0].length).trim()
+
+                for (let i = 0; i < repeatNumber; i++) {
+                    newLabels.push({ ...a })
+                }
+            } else {
+                newLabels.push(a)
+            }
         } else newLabels.push(a)
     })
     return newLabels
@@ -512,7 +550,7 @@ function fixText(text: string, formatText: boolean): string {
 
     // remove group from text
     if (text[0] === "[" && text.includes("]")) text = text.slice(text.indexOf("]") + 1)
-    if (text.indexOf(":") === text.split("\n")[0].length - 1) text = text.slice(text.indexOf(":") + 1)
+    if (text.indexOf(":") === text.split("\n")[0].length - 1 && (formatText || text.split("\n")[0]?.split(" ").length < 3)) text = text.slice(text.indexOf(":") + 1)
 
     if (formatText) {
         // repeat text
@@ -623,6 +661,11 @@ function findPatterns(sections: string[]) {
         if (find) return find.type
         if (!length) return "break"
 
+        // Priority: Use explicit label match before checking for text similarity to respect musical structure
+        const rawName = splitted[0].replace(/[\[\]'":]+/g, "").trim()
+        const exactMatch = findGroupMatch(rawName)
+        if (exactMatch) return exactMatch
+
         // TODO: group....
         const name = getLabelId(splitted[0])
         if (findGroupMatch(name)) return findGroupMatch(name) || name
@@ -640,7 +683,7 @@ function findPatterns(sections: string[]) {
 
         // if (length < 10 && !sections[i].includes("\n")) return sections[i].trim()
         if (length < 30 || linesSimilarity(sections[i])) return "tag"
-        if (splitted[0].length < 8 && splitted[1].length > 20) {
+        if (splitted[0].length < 8 && splitted[1]?.length > 20 && !/[,.!?-]/.test(splitted[0])) {
             sections[i] = splitted.slice(1, splitted.length).join("\n")
             let group = splitted[0]
             if (get(groupNumbers)) group = group.replace(/\d+/g, "").trim()
@@ -709,7 +752,19 @@ function editDistance(s1: string, s2: string) {
 }
 
 export function findGroupMatch(group: string): string {
-    if (get(groups)[group]) return group
+    // Check if the label matches a custom group name defined by the user
+    const allGroups = get(groups)
+    const searchLabel = group.toLowerCase().trim()
+
+    if (allGroups[searchLabel]) return searchLabel
+
+    let customMatchId = ""
+    Object.entries(allGroups).forEach(([id, config]: [string, any]) => {
+        if (config.name && config.name.toLowerCase() === searchLabel) {
+            customMatchId = id
+        }
+    })
+    if (customMatchId) return customMatchId
 
     let groupMatch = ""
     Object.entries(get(dictionary).groups || {}).forEach(([id, value]) => {

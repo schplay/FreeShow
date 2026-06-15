@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount } from "svelte"
     import { actions, categories, popupData } from "../../../stores"
-    import T from "../../helpers/T.svelte"
     import MaterialDropdown from "../../inputs/MaterialDropdown.svelte"
+    import Tip from "../Tip.svelte"
 
     let selectedCategory = $popupData?.id
     onMount(() => {
@@ -25,20 +25,8 @@
 
         currentAction = id
     }
-
-    let open = false
 </script>
 
-<p class="tip"><T id="category.action_tip" /></p>
+<Tip type="info" value="category.action_tip" bottom={20} />
 
-<div style="min-height: {open ? 350 : 0}px;">
-    <MaterialDropdown bind:open label="midi.start_action" options={actionOptions.map((a) => ({ label: a.name, value: a.id }))} value={currentAction} allowEmpty on:change={(e) => updateValue(e.detail)} />
-</div>
-
-<style>
-    .tip {
-        margin-bottom: 10px;
-        opacity: 0.7;
-        font-size: 0.9em;
-    }
-</style>
+<MaterialDropdown label="midi.start_action" options={actionOptions.map((a) => ({ label: a.name, value: a.id }))} value={currentAction} allowEmpty on:change={(e) => updateValue(e.detail)} />

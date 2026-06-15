@@ -3,25 +3,22 @@
 <script lang="ts">
     import { onDestroy } from "svelte"
     import { uid } from "uid"
-    import { Main } from "../../../types/IPC/Main"
     import { OutData } from "../../../types/Output"
     import type { Styles } from "../../../types/Settings"
-    import type { AnimationData, LayoutRef, OutBackground, OutSlide, Slide, SlideData, Template, Overlays as TOverlays } from "../../../types/Show"
-    import { requestMain } from "../../IPC/main"
-    import { allOutputs, colorbars, currentWindow, customMessageCredits, drawSettings, drawTool, effects, media, outputs, overlays, showsCache, styles, templates, transitionData } from "../../stores"
+    import type { AnimationData, Item, LayoutRef, OutBackground, OutSlide, Slide, SlideData, Template, Overlays as TOverlays } from "../../../types/Show"
+    import { allOutputs, colorbars, currentWindow, drawSettings, drawTool, effects, media, outputs, overlays, showsCache, styles, templates, transitionData } from "../../stores"
     import { wait } from "../../utils/common"
     import { custom } from "../../utils/transitions"
     import Draw from "../draw/Draw.svelte"
     import { clone } from "../helpers/array"
-    import { decodeExif, defaultLayers, getCurrentStyle, getMetadata, getOutputLines, getOutputTransitions, getResolution, getSlideFilter, getStyleTemplate, joinMetadata, OutputMetadata, setTemplateStyle } from "../helpers/output"
-    import { replaceDynamicValues } from "../helpers/showActions"
+    import { defaultLayers, getCurrentStyle, getMetadata, getOutputLines, getOutputTransitions, getResolution, getSlideFilter, getStyleTemplate, setTemplateStyle } from "../helpers/output"
     import { _show } from "../helpers/shows"
     import Image from "../media/Image.svelte"
     import Zoomed from "../slide/Zoomed.svelte"
     import { updateAnimation } from "./animation"
     import EffectOutput from "./effects/EffectOutput.svelte"
     import Background from "./layers/Background.svelte"
-    import Metadata from "./layers/Metadata.svelte"
+    import Overlay from "./layers/Overlay.svelte"
     import Overlays from "./layers/Overlays.svelte"
     import PdfOutput from "./layers/PdfOutput.svelte"
     import SlideContent from "./layers/SlideContent.svelte"
@@ -40,8 +37,15 @@
     // output styling
     $: currentStyling = getCurrentStyle($styles, styleIdOverride || currentOutput.style)
     let currentStyle: Styles = { name: "" }
+    let cachedStyleStr = ""
     // don't refresh content unless it changes
-    $: if (JSON.stringify(currentStyling) !== JSON.stringify(currentStyle)) currentStyle = clone(currentStyling)
+    $: {
+        const newStr = JSON.stringify(currentStyling)
+        if (newStr !== cachedStyleStr) {
+            cachedStyleStr = newStr
+            currentStyle = clone(currentStyling)
+        }
+    }
 
     $: alignPosition = currentStyle?.aspectRatio?.alignPosition || "center"
 
@@ -52,22 +56,55 @@
     let background: OutBackground | null = null
     let clonedOverlays: TOverlays | null = null
 
-    $: effectsIds = clone(out.effects || [])
+    let effectsIds: string[] = []
     $: allEffects = $effects
     $: effectsUnderSlide = effectsIds.filter((id) => allEffects[id]?.placeUnderSlide === true)
     $: effectsOverSlide = effectsIds.filter((id) => !allEffects[id]?.placeUnderSlide)
 
     // don't update when layer content changes, only when refreshing or adding/removing layer
     // currentOutput is set to refresh state when changed in preview
-    $: if (currentOutput && JSON.stringify(layers) !== JSON.stringify(currentStyle.layers || defaultLayers)) setNewLayers()
-    function setNewLayers() {
-        layers = clone(Array.isArray(currentStyle.layers) ? currentStyle.layers : defaultLayers)
-        if (!Array.isArray(layers)) layers = []
+    let cachedLayersStr = ""
+    $: if (currentOutput) {
+        const newLayersStr = JSON.stringify(currentStyle.layers || defaultLayers)
+        if (newLayersStr !== cachedLayersStr) {
+            cachedLayersStr = newLayersStr
+            layers = clone(Array.isArray(currentStyle.layers) ? currentStyle.layers : defaultLayers)
+            if (!Array.isArray(layers)) layers = []
+        }
     }
-    $: if (JSON.stringify(out) !== JSON.stringify(outOverride || currentOutput?.out || {})) out = clone(outOverride || currentOutput?.out || {})
+    let cachedOutStr = ""
+    $: {
+        const newOutStr = JSON.stringify(outOverride || currentOutput?.out || {})
+        if (newOutStr !== cachedOutStr) {
+            cachedOutStr = newOutStr
+            out = clone(outOverride || currentOutput?.out || {})
+        }
+    }
 
-    $: if (JSON.stringify(slide) !== JSON.stringify(out.slide || null)) updateOutData("slide")
-    $: if (JSON.stringify(background) !== JSON.stringify(out.background || null)) updateOutData("background")
+    let cachedSlideStr = ""
+    $: {
+        const newSlideStr = JSON.stringify(out.slide || null)
+        if (newSlideStr !== cachedSlideStr) {
+            cachedSlideStr = newSlideStr
+            updateOutData("slide")
+        }
+    }
+    let cachedBgStr = ""
+    $: {
+        const newBgStr = JSON.stringify(out.background || null)
+        if (newBgStr !== cachedBgStr) {
+            cachedBgStr = newBgStr
+            updateOutData("background")
+        }
+    }
+    let cachedEffectsStr = ""
+    $: {
+        const newEffectsStr = JSON.stringify(out.effects || [])
+        if (newEffectsStr !== cachedEffectsStr) {
+            cachedEffectsStr = newEffectsStr
+            effectsIds = clone(out.effects || [])
+        }
+    }
 
     $: refreshOutput = out.refresh
     $: if (outputId || refreshOutput) updateOutData()
@@ -104,7 +141,10 @@
     $: overlayIds = out.overlays
     let storedOverlayIds = ""
     let storedOverlays = ""
-    $: if (JSON.stringify(overlayIds) !== storedOverlayIds) updateOutData("overlays")
+    $: {
+        const newOverlayIdsStr = JSON.stringify(overlayIds)
+        if (newOverlayIdsStr !== storedOverlayIds) updateOutData("overlays")
+    }
     $: outOverlays = out.overlays?.filter((id) => !clonedOverlays?.[id]?.placeUnderSlide) || []
     $: outUnderlays = out.overlays?.filter((id) => clonedOverlays?.[id]?.placeUnderSlide) || []
 
@@ -127,7 +167,9 @@
 
         // don't refresh content unless it changes
         let newCurrentSlide = getCurrentSlide()
-        if (JSON.stringify(formatSlide(newCurrentSlide)) !== JSON.stringify(currentSlide)) currentSlide = newCurrentSlide
+        const newSlideFormatStr = JSON.stringify(formatSlide(newCurrentSlide))
+        const curSlideStr = JSON.stringify(currentSlide)
+        if (newSlideFormatStr !== curSlideStr) currentSlide = newCurrentSlide
 
         function getCurrentSlide() {
             if (!slide && !outputId) return null
@@ -142,7 +184,7 @@
         function formatSlide(currentSlide) {
             if (!currentSlide) return null
             let newSlide = clone(currentSlide)
-            newSlide.items = setTemplateStyle(slide, currentStyle, newSlide.items, outputId)
+            newSlide.items = setTemplateStyle(slide, currentStyle, newSlide.items, outputId, newSlide.customDynamicValues)
             return newSlide
         }
     }
@@ -161,7 +203,7 @@
         if (currentSlide) setTemplateItems()
         getStyleTemplateData()
     }
-    const setTemplateItems = () => (currentSlide!.items = setTemplateStyle(slide!, currentStyle, currentSlide!.items, outputId))
+    const setTemplateItems = () => (currentSlide!.items = setTemplateStyle(slide!, currentStyle, currentSlide!.items, outputId, currentSlide!.customDynamicValues))
     let styleTemplate: Template | null = null
     const getStyleTemplateData = () => (styleTemplate = getStyleTemplate(slide!, currentStyle))
     $: templateBackground = styleTemplate?.settings?.backgroundPath || ""
@@ -178,20 +220,23 @@
     }
 
     // metadata
-    let metadata: OutputMetadata = {}
-    $: metadata = getMetadata(metadata, $showsCache[slide?.id || ""], currentStyle, $templates, slide)
-
-    // media exif metadata
-    $: getExifData = metadata.media
-    $: if (getExifData && background?.path) getExif()
-    async function getExif() {
-        metadata.value = ""
-
-        const data = await requestMain(Main.READ_EXIF, { id: background?.path || "" })
-        if (!metadata.media || data.id !== background?.path) return
-
-        let message = decodeExif(data)
-        metadata.value = joinMetadata(message, currentStyle.metadataDivider)
+    $: metadataItems = getMetadata($showsCache[(slide as any)?.id || ""], currentStyle, slide, $templates)
+    let currentMetadataItems: Item[] = []
+    let cachedMetadataStr = ""
+    let isMetadataClearing = false
+    $: if (metadataItems !== null) {
+        isMetadataClearing = false
+        const newMetaStr = JSON.stringify(metadataItems)
+        if (newMetaStr !== cachedMetadataStr) {
+            cachedMetadataStr = newMetaStr
+            currentMetadataItems = clone(metadataItems)
+        }
+    } else {
+        isMetadataClearing = true
+        setTimeout(() => {
+            currentMetadataItems = []
+            cachedMetadataStr = ""
+        })
     }
 
     // ANIMATE
@@ -206,7 +251,7 @@
         currentAnimationId = ""
     }
 
-    // TODO: play slide animations on each textbox so animation can continue while transitioning
+    // DEPRECATED!!
     $: if (slideAnimation) initializeAnimation()
     async function initializeAnimation() {
         if (!Object.keys(slideAnimation || {}).length) {
@@ -253,16 +298,7 @@
     $: cropping = currentOutput.cropping || currentStyle.cropping
 
     // values
-    $: backgroundColor = currentOutput.transparent ? "transparent" : styleTemplate?.settings?.backgroundColor || currentSlide?.settings?.color || currentStyle.background || "black"
-    $: messageText = $showsCache[slide?.id || ""]?.message?.text?.replaceAll("\n", "<br>") || ""
-    // metadata display
-    $: firstActiveSlideIndex = currentLayout.findIndex((a) => !a.data.disabled)
-    $: lastActiveSlideIndex = currentLayout.length - 1 - [...currentLayout].reverse().findIndex((a) => !a.data.disabled)
-    $: displayMetadata =
-        metadata.value?.length &&
-        (metadata.display === "always" ||
-            (metadata.display?.includes("first") && (slide?.index === firstActiveSlideIndex || slide?.index === 0)) ||
-            (metadata.display?.includes("last") && (slide?.index === lastActiveSlideIndex || slide?.index === currentLayout.length - 1)))
+    $: backgroundColor = currentOutput.transparent ? "transparent" : styleTemplate?.settings?.backgroundColor || currentSlide?.settings?.color || currentStyle.background || slide?.settings?.backgroundColor || "black"
     // background image
     $: styleBackground = currentStyle?.clearStyleBackgroundOnText && (slide || background) ? "" : currentStyle?.backgroundImage || ""
     $: styleBackgroundData = { path: styleBackground, ...($media[styleBackground] || {}), loop: true }
@@ -294,36 +330,16 @@
             actualCurrentLineId = clone(currentLineId)
         })
     }
-
-    // UPDATE DYNAMIC VALUES e.g. {time_} EVERY SECOND
-    let updateDynamic = 0
-    const dynamicInterval = setInterval(() => {
-        updateDynamic++
-    }, 1000)
-    onDestroy(() => clearInterval(dynamicInterval))
 </script>
 
-<Zoomed
-    id={outputId}
-    background={backgroundColor}
-    checkered={(preview || mirror) && backgroundColor === "transparent"}
-    backgroundDuration={transitions.media?.type === "none" ? 0 : (transitions.media?.duration ?? 800)}
-    align={alignPosition}
-    center
-    {style}
-    {resolution}
-    {mirror}
-    {drawZoom}
-    {cropping}
-    bind:ratio
->
+<Zoomed id={outputId} background={backgroundColor} checkered={(preview || mirror) && backgroundColor === "transparent"} backgroundDuration={transitions.media?.type === "none" ? 0 : (transitions.media?.duration ?? 800)} align={alignPosition} center {style} {resolution} {mirror} {drawZoom} {cropping} bind:ratio>
     <!-- always show style background (behind other backgrounds) -->
     {#if styleBackground && actualSlide?.type !== "pdf"}
         <Background data={styleBackgroundData} {outputId} transition={transitions.media} {currentStyle} {slideFilter} {ratio} animationStyle={animationData.style?.background || ""} mirror styleBackground />
     {/if}
 
     <!-- background -->
-    {#if (layers.includes("background") || backgroundData?.ignoreLayer) && backgroundData}
+    {#if (backgroundData?.ignoreLayer ? layers.includes("slide") : layers.includes("background")) && backgroundData}
         <Background data={backgroundData} {outputId} transition={transitions.media} {currentStyle} {slideFilter} {ratio} animationStyle={animationData.style?.background || ""} {mirror} />
     {/if}
 
@@ -355,41 +371,13 @@
             {/if}
         </span>
     {:else if actualSlide && actualSlide?.type !== "pdf"}
-        <SlideContent
-            {outputId}
-            outSlide={actualSlide}
-            isClearing={isSlideClearing}
-            slideData={actualSlideData}
-            currentSlide={actualCurrentSlide}
-            {currentStyle}
-            {animationData}
-            currentLineId={actualCurrentLineId}
-            {lines}
-            {ratio}
-            {mirror}
-            {preview}
-            transition={transitions.text}
-            transitionEnabled={!mirror || preview}
-            {styleIdOverride}
-        />
+        <SlideContent {outputId} outSlide={actualSlide} isClearing={isSlideClearing} slideData={actualSlideData} currentSlide={actualCurrentSlide} {currentStyle} {animationData} currentLineId={actualCurrentLineId} {lines} {ratio} {mirror} {preview} transition={transitions.text} transitionEnabled={!mirror || preview} {styleIdOverride} />
+
+        <!-- metadata -->
+        <Overlay overlay={{ items: currentMetadataItems }} isClearing={isMetadataClearing || isSlideClearing} {outputId} transition={transitions.text} />
     {/if}
 
     {#if layers.includes("overlays")}
-        <!-- message -->
-        {#if messageText}
-            <Metadata
-                value={messageText.includes("{") ? replaceDynamicValues(messageText, { showId: actualSlide?.id, layoutId: actualSlide?.layout, slideIndex: actualSlide?.index }, updateDynamic) : messageText}
-                style={metadata.messageStyle || ""}
-                transition={metadata.messageTransition || transitions.overlay}
-            />
-        {/if}
-
-        <!-- metadata -->
-        {#if displayMetadata || ((layers.includes("background") || backgroundData?.ignoreLayer) && $customMessageCredits)}
-            <!-- value={metadata.value ? (metadata.value.includes("{") ? createMetadataLayout(metadata.value, { showId: actualSlide?.id, layoutId: actualSlide?.layout, slideIndex: actualSlide?.index }, updateDynamic) : metadata.value) : $customMessageCredits || ""} -->
-            <Metadata value={metadata.value || $customMessageCredits || ""} style={metadata.style || ""} conditions={metadata.condition} isClearing={isSlideClearing} {outputId} transition={metadata.transition || transitions.overlay} />
-        {/if}
-
         <!-- effects -->
         {#if effectsOverSlide}
             <EffectOutput ids={effectsOverSlide} transition={transitions.overlay} {mirror} />
@@ -404,9 +392,9 @@
 
     {#if actualSlide?.attributionString && layers.includes("slide")}
         {#if mirror}
-            <p class="attributionString">{actualSlide.attributionString}</p>
+            <p class="attributionString">{actualSlide.attributionString.slice(0, 135)}</p>
         {:else}
-            <p class="attributionString" transition:custom={transitions.text}>{actualSlide.attributionString}</p>
+            <p class="attributionString" transition:custom={transitions.text}>{actualSlide.attributionString.slice(0, 135)}</p>
         {/if}
     {/if}
 

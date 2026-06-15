@@ -1,9 +1,9 @@
 <script lang="ts">
     import type { TabsObj } from "../../../types/Tabs"
-    import { activeEdit, activeShow, media, outputs } from "../../stores"
+    import { activeEdit, activeShow, media } from "../../stores"
     import { clone } from "../helpers/array"
     import { getExtension, getMediaType } from "../helpers/media"
-    import { getActiveOutputs, setOutput } from "../helpers/output"
+    import { getFirstActiveOutput, setOutput } from "../helpers/output"
     import { removeStore, updateStore } from "../helpers/update"
     import FloatingInputs from "../input/FloatingInputs.svelte"
     import MaterialButton from "../inputs/MaterialButton.svelte"
@@ -41,10 +41,13 @@
             let videoDuration = video?.duration || 0
             if (!videoDuration) return
 
+            const maxSoftLoop = Math.floor(videoDuration / 2)
+
             setBoxInputValue(mediaSections, "video", "toTime", "value", currentMedia?.toTime || videoDuration)
             setBoxInputValue(mediaSections, "video", "toTime", "default", videoDuration)
             setBoxInputValue(mediaSections, "video", "fromTime", "values", { max: videoDuration })
             setBoxInputValue(mediaSections, "video", "toTime", "values", { max: videoDuration })
+            setBoxInputValue(mediaSections, "video", "softLoop", "values", { max: Math.min(50, maxSoftLoop), sliderValues: { max: Math.min(10, maxSoftLoop), step: 0.5 } })
             mediaSections = mediaSections
         }
     }
@@ -58,7 +61,7 @@
         deleteKeys.forEach((key) => removeStore("media", { keys: [mediaId, key] }))
 
         // update output
-        let currentOutput: any = $outputs[getActiveOutputs()[0]]
+        let currentOutput: any = getFirstActiveOutput()
         let bg = currentOutput?.out?.background
         if (!bg) return
         deleteKeys.forEach((key) => delete bg[key])
@@ -77,10 +80,10 @@
         updateStore("media", { keys: [mediaId, ...input.id.split(".")], value })
 
         // update output filters
-        let currentOutput = $outputs[getActiveOutputs()[0]] || {}
-        if (!currentOutput.out?.background || currentOutput.out?.background?.path !== mediaId) return
+        let currentOutput = getFirstActiveOutput()
+        if (!currentOutput?.out?.background || currentOutput?.out?.background?.path !== mediaId) return
 
-        let bg = currentOutput.out.background
+        let bg = currentOutput?.out.background
         bg[input.id] = value
         setOutput("background", bg)
     }

@@ -41,8 +41,6 @@ function connected(socket: Socket) {
     log("Client connected.")
     sendToMain(ToMain.WEBSOCKET, "connected") // TODO: respond with API_DATA
 
-    socket.on("disconnect", () => log("Client disconnected."))
-
     socket.on("data", async (data: string) => {
         let parsedData
         try {
@@ -54,27 +52,46 @@ function connected(socket: Socket) {
 
         let returnData
         if (parsedData.isVariable) {
-            returnData = { isVariable: true, values: await requestToMain(ToMain.GET_DYNAMIC_VALUES, parsedData.keys || []) }
+            returnData = { isVariable: true, values: (await requestToMain(ToMain.GET_DYNAMIC_VALUES, parsedData.keys || [])) || {} }
         } else {
             returnData = await receivedData(parsedData, log)
         }
         if (!returnData) return
 
-        socket.emit("data", returnData)
+        safeEmit("data", returnData)
     })
 
-    ipcMain.on("API_DATA", (_e, msg) => {
-        socket.emit("data", msg)
+    const apiDataHandler = (_e: any, msg: any) => safeEmit("data", msg)
+
+    ipcMain.on("API_DATA", apiDataHandler)
+
+    socket.on("disconnect", () => {
+        log("Client disconnected.")
+
+        try {
+            ipcMain.removeListener("API_DATA", apiDataHandler)
+        } catch (err) {
+            // ignore
+        }
     })
+
+    function safeEmit(event: string, payload: any) {
+        try {
+            if (socket && (socket as any).connected !== false) socket.emit(event, payload)
+        } catch (err) {
+            console.error(`Error emitting ${event} to socket:`, err)
+        }
+    }
 
     function log(msg: string, isError = false) {
         console.info(`WebSocket: ${msg}`)
-        if (isError) socket.emit("error", msg)
+        if (isError) safeEmit("error", msg)
     }
 }
 
 // REST
 
+let restHandlersInitialized = false
 function startRestListener(PORT: number) {
     const server = (servers.REST = app.listen(PORT, () => {
         console.info(`REST: Listening for data at port ${PORT.toString()}`)
@@ -83,6 +100,9 @@ function startRestListener(PORT: number) {
     server.once("error", (err: any) => {
         if (err.code === "EADDRINUSE") server.close()
     })
+
+    if (restHandlersInitialized) return
+    restHandlersInitialized = true
 
     app.use(express.json())
     // app.use(cors()) // if a browser should send body data (https://stackoverflow.com/a/63547498/10803046)
@@ -170,7 +190,13 @@ export function emitOSC(msg: { signal: any; data: string }) {
 
         OSC_SENDER.send(message)
         // ensure message is sent
-        setTimeout(() => OSC_SENDER.close(), 100)
+        setTimeout(() => {
+            try {
+                OSC_SENDER.close()
+            } catch (err) {
+                // already closed
+            }
+        }, 100)
     }
 }
 
@@ -196,7 +222,7 @@ async function receivedData(data: any = {}, log: (...msg: any[]) => void): Promi
 
     if (!data.returnId) return
 
-    const returnData = await waitUntilValueIsDefined(() => returnDataObj[data.returnId], 50, 1000)
+    const returnData = await waitUntilValueIsDefined(() => returnDataObj[data.returnId], 50, 10000)
     delete returnDataObj[data.returnId]
     log(`Sending data ${String(data.action)}`)
     return returnData
@@ -214,6 +240,12 @@ export function apiReturnData(data: any) {
 // CLOSE
 
 export function stopApiListener(specificId = "") {
+    try {
+        ipcMain.removeAllListeners("API_DATA")
+    } catch (err) {
+        // ignore
+    }
+
     if (specificId) {
         stop(specificId)
     } else {
@@ -222,7 +254,7 @@ export function stopApiListener(specificId = "") {
 
     function stop(id: string) {
         console.info(`${id}: Stopping server.`)
-        
+
         try {
             if (servers[id]) {
                 servers[id].close()

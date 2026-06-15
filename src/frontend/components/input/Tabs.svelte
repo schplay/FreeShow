@@ -31,12 +31,19 @@
     }
 
     $: className = $$props.class || ""
+    const getTabClass = (tab: any) => {
+        if (className.includes("output") && tab.stageOutput) return `${className}_stage`
+        if (id === "profile" && tab.id === "") return `${className}_admin`
+        return className
+    }
 
     // custom tab styling
     function getStyle(tabId: string) {
         if (id === "theme") {
             const theme = $themes[tabId]
             const colors = theme.colors
+            if (!colors) return ""
+
             // font-family: ${theme.font.family};
             return `background-color: ${colors["primary-darker"]};color: ${colors.secondary};font-family: sans-serif;`
         }
@@ -53,7 +60,7 @@
                 {@const style = getStyle(tab.id)}
 
                 <SelectElem {id} data={{ id: tab.id }} fill>
-                    <button {style} class="tab {className}{className.includes('output') && tab.stageOutput ? '_stage' : ''}" class:active on:click={() => open(tab.id)}>
+                    <button {style} class="tab {getTabClass(tab)}" class:active on:click={() => open(tab.id)}>
                         <slot {tab} />
                     </button>
                 </SelectElem>

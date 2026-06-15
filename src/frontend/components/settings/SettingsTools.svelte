@@ -2,7 +2,7 @@
     import { Main } from "../../../types/IPC/Main"
     import type { Popups } from "../../../types/Main"
     import { sendMain } from "../../IPC/main"
-    import { activePopup, dataPath, outputs, settingsTab } from "../../stores"
+    import { activePopup, dataPath, outputs, popupData, settingsTab } from "../../stores"
     import T from "../helpers/T.svelte"
     import MaterialButton from "../inputs/MaterialButton.svelte"
 
@@ -11,14 +11,12 @@
     // OPEN
 
     function open(id: Popups) {
+        popupData.set({})
         activePopup.set(id)
     }
 
     function openLog() {
         sendMain(Main.OPEN_LOG)
-    }
-    function openCache() {
-        sendMain(Main.OPEN_CACHE)
     }
     function openAppData() {
         sendMain(Main.OPEN_APPDATA)
@@ -58,9 +56,6 @@
     <div class="bottom">
         <MaterialButton variant="outlined" icon="document" on:click={openLog} small>
             <T id="actions.open_error_log" />
-        </MaterialButton>
-        <MaterialButton variant="outlined" icon="folder" on:click={openCache} small>
-            <T id="actions.open_cache_folder" />
         </MaterialButton>
         <MaterialButton variant="outlined" icon="folder" on:click={openAppData} small>
             <T id="actions.open_app_data_folder" />

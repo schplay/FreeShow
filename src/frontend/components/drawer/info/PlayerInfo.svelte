@@ -1,12 +1,13 @@
 <script lang="ts">
     import { OUTPUT } from "../../../../types/Channels"
-    import { drawerTabsData, outputs, photoApiCredits, playerVideos } from "../../../stores"
+    import { drawerTabsData, photoApiCredits, playerVideos } from "../../../stores"
     import { send } from "../../../utils/request"
     import Icon from "../../helpers/Icon.svelte"
-    import { getActiveOutputs } from "../../helpers/output"
+    import { getAllNormalOutputs } from "../../helpers/output"
     import T from "../../helpers/T.svelte"
     import Button from "../../inputs/Button.svelte"
     import Link from "../../inputs/Link.svelte"
+    import CanvaInfo from "./CanvaInfo.svelte"
     import InfoMetadata from "./InfoMetadata.svelte"
 
     $: active = $drawerTabsData.media?.openedSubSubTab?.online || "youtube"
@@ -19,8 +20,8 @@
         // { label: "info.download", value: $photoApiCredits.downloadUrl, type: "url" },
     ]
 
-    $: isPlayingYoutube = getActiveOutputs($outputs, false, true, true).find((outputId) => {
-        const bg = $outputs[outputId].out?.background
+    $: isPlayingYoutube = getAllNormalOutputs().find((output) => {
+        const bg = output.out?.background
         return bg?.type === "player" && $playerVideos[bg?.id || ""]?.type === "youtube"
     })
 </script>
@@ -36,8 +37,10 @@
             <T id="inputs.close_ad" />
         </Button>
     {/if}
+{:else if active === "canva"}
+    <CanvaInfo />
 {:else if active === $photoApiCredits.type}
-    {#if $photoApiCredits.photo}
+    {#if $photoApiCredits.photo !== undefined}
         <div style="flex: 1;margin-bottom: 25px;">
             <InfoMetadata title={$photoApiCredits.photo} {info} />
         </div>

@@ -4,13 +4,14 @@ import { mainWindow, toApp } from "../.."
 import { MAIN, OUTPUT } from "../../../types/Channels"
 import type { Output } from "../../../types/Output"
 import { OutputHelper } from "../OutputHelper"
+import { setOutputAlwaysOnTop } from "./OutputAlwaysOnTop"
 import { OutputBounds } from "./OutputBounds"
 
 export class OutputVisibility {
     static toggleOutputs(data: { outputs: (Output & { id: string })[]; state: boolean; force?: boolean; autoStartup?: boolean; autoPosition?: boolean }) {
         const newStates: { id: string; active: boolean | "invisible" }[] = []
 
-        data.outputs.forEach(output => {
+        data.outputs.forEach((output) => {
             const force = !!(data.force || output.allowMainScreen || output.boundsLocked)
             const newState = OutputVisibility.toggleOutput(output, data.state, force, data.autoStartup, data.autoPosition)
             newStates.push({ id: output.id, active: newState })
@@ -19,7 +20,7 @@ export class OutputVisibility {
         toApp(OUTPUT, { channel: "OUTPUT_STATE", data: newStates })
     }
 
-    static toggleOutput(output: (Output & { id: string }), state: boolean, force?: boolean, autoStartup?: boolean, autoPosition?: boolean) {
+    static toggleOutput(output: Output & { id: string }, state: boolean, force?: boolean, autoStartup?: boolean, autoPosition?: boolean) {
         if (!output?.id) return false
 
         let window: BrowserWindow = OutputHelper.getOutput(output.id)?.window
@@ -43,7 +44,7 @@ export class OutputVisibility {
         const windowNotCoveringMain = this.amountCovered(bounds, mainWindow!.getBounds()) < 0.5
 
         if (state === true && (force || window.isAlwaysOnTop() === false || windowNotCoveringMain)) {
-            this.showWindow(window)
+            this.showWindow(window, output.alwaysOnTop !== false)
 
             OutputHelper.Bounds.updateBounds({ id: output.id, bounds })
             return true
@@ -95,10 +96,11 @@ export class OutputVisibility {
     // https://github.com/electron/electron/issues/1415
     // https://github.com/electron/electron/issues/1054
 
-    static showWindow(window: BrowserWindow) {
+    static showWindow(window: BrowserWindow, alwaysOnTop = true) {
         if (!window || window.isDestroyed()) return
 
         window.showInactive()
+        if (alwaysOnTop) setOutputAlwaysOnTop(window, true)
         window.moveTop()
     }
 

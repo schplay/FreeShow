@@ -46,27 +46,24 @@
     onMount(() => {
         let currentShow = $showsCache[showId] || {}
         let activeLayout = currentShow.settings?.activeLayout
-        let layoutSlides = currentShow.layouts?.[activeLayout]?.slides
+        let layoutSlides = currentShow.layouts?.[activeLayout]?.slides || []
 
         layoutSlides.forEach((a) => {
-            _show()
-                .slides([a.id])
-                .get("items")
-                .flat()
-                .forEach((a) => {
-                    if (a.language) translatedLangs.push(a.language)
-                })
+            if (!a?.id) return
+
+            let items = _show().slides([a.id]).get("items") || []
+            items.flat().forEach((item) => {
+                if (item?.language) translatedLangs.push(item.language)
+            })
         })
 
         translatedLangs = [...new Set(translatedLangs)]
         console.log(translatedLangs)
     })
-
-    let open = false
 </script>
 
-<div class="main" style={open ? "min-height: 330px;" : ""}>
-    <MaterialDropdown bind:open label="settings.language" options={languageList} value={$special.translationLanguage} on:change={updateLanguage} flags />
+<div class="main">
+    <MaterialDropdown label="settings.language" options={languageList} value={$special.translationLanguage} on:change={updateLanguage} flags />
 
     <MaterialButton variant="contained" style="margin-top: 20px;width: 100%;" disabled={!$special.translationLanguage} on:click={convert}>
         <Icon size={1.1} id="translate" white />

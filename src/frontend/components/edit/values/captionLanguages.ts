@@ -155,7 +155,7 @@ export const captionLanguages = [
     { id: "ve-ZA", name: "Venda (South Africa)" },
     { id: "vi-VN", name: "Vietnamese (Vietnam)" },
     { id: "xh-ZA", name: "Xhosa (South Africa)" },
-    { id: "zu-ZA", name: "Zulu (South Africa)" },
+    { id: "zu-ZA", name: "Zulu (South Africa)" }
 ]
 
 // https://github.com/mozilla/translate - MPL 2.0 - Mozilla
@@ -167,16 +167,17 @@ export const captionTranslateLanguages = [
     { id: "nl", name: "Dutch" },
     { id: "en", name: "English" },
     { id: "et", name: "Estonian" },
-    { id: "de", name: "German" },
     { id: "fr", name: "French" },
-    { id: "is", name: "Icelandic" },
+    { id: "de", name: "German" },
     { id: "it", name: "Italian" },
-    { id: "nb", name: "Norwegian Bokmål" },
-    { id: "nn", name: "Norwegian Nynorsk" },
-    { id: "fa", name: "Persian" },
     { id: "pl", name: "Polish" },
     { id: "pt", name: "Portuguese" },
-    { id: "ru", name: "Russian" },
     { id: "es", name: "Spanish" },
-    { id: "uk", name: "Ukrainian" },
+    { id: "zh", name: "Chinese (Simplified)" },
+    { id: "ja", name: "Japanese" },
+    { id: "ko", name: "Korean" },
+    { id: "ru", name: "Russian" },
+    { id: "is", name: "Icelandic (limited)" },
+    { id: "nb", name: "Norwegian Bokmål (limited)" },
+    { id: "nn", name: "Norwegian Nynorsk (limited)" }
 ]

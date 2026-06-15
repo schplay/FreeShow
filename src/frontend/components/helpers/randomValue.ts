@@ -52,7 +52,7 @@ export function setRandomValue(id: string) {
             }
             randomIndex -= range.count
         }
-    } while (variable.eachNumberOnce && randomValue && variable.setLog?.find((a) => a.name === randomValue!.name && a.number === randomValue!.number) && loopStop < 50000)
+    } while (variable.eachNumberOnce && randomValue && variable.setLog?.find((a) => a.name === randomValue!.name && Number(a.number) === randomValue!.number) && loopStop < 50000)
 
     if (!randomValue) return
 
@@ -76,16 +76,16 @@ async function animateValue(id: string, chars: number, finalValue: { name: strin
 
     for (let i = 0; i < steps; i++) {
         let randomNumber = start
-            ;[...Array(chars - currentStep)].forEach((_, step) => {
-                // never display the same int twice in a row
-                let num = -1
-                do {
-                    num = Math.floor(Math.random() * 10) // 0-9
-                } while (lastNums[step] === num)
+        ;[...Array(chars - currentStep)].forEach((_, step) => {
+            // never display the same int twice in a row
+            let num = -1
+            do {
+                num = Math.floor(Math.random() * 10) // 0-9
+            } while (lastNums[step] === num)
 
-                lastNums[step] = num
-                randomNumber += num
-            })
+            lastNums[step] = num
+            randomNumber += num
+        })
 
         updateVariable(id, "number", Number(randomNumber))
 
@@ -114,7 +114,7 @@ function setRandom(id: string, finalValue: { name: string; number: number }) {
         // numbers log
         const MAX_LOG_SIZE = 100
         const setLog = (a[id].setLog || []).slice(0, MAX_LOG_SIZE)
-        setLog.unshift(finalValue)
+        setLog.unshift({ name: finalValue.name, number: finalValue.number.toString().padStart(getSetChars(a[id].sets), "0") })
         a[id].setLog = setLog
 
         return a

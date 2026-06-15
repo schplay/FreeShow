@@ -3,45 +3,31 @@ import type { MidiValues, TransitionType } from "../../../types/Show"
 import { clearAudio } from "../../audio/audioFading"
 import { AudioPlayer } from "../../audio/audioPlayer"
 import { AudioPlaylist } from "../../audio/audioPlaylist"
+import { markItemsAsPlayed } from "../../converters/project"
 import { convertText } from "../../converters/txt"
 import { sendMain } from "../../IPC/main"
+import { slideTimelineSpeedMultiplier } from "../../stores"
 import { transposeText } from "../../utils/chordTranspose"
 import { triggerFunction } from "../../utils/common"
-import { syncDrive } from "../../utils/drive"
+import { obsSetScene, obsStartLivestream, obsStartRecording, obsStopLivestream, obsStopRecording } from "../../utils/obsTalk"
 import { togglePlayingMedia } from "../../utils/shortcuts"
 import { contentProviderSync } from "../../utils/startup"
 import { updateTransition } from "../../utils/transitions"
 import { startMetronome } from "../drawer/audio/metronome"
 import { pauseAllTimers } from "../drawer/timers/timers"
 import { getSlideThumbnail, getThumbnail } from "../helpers/media"
-import { changeStageOutputLayout, startCamera, startScreen, toggleOutput, toggleOutputs } from "../helpers/output"
-import { activateTriggerSync, changeOutputStyle, nextSlideIndividual, playSlideTimers, previousSlideIndividual, randomSlide, replaceDynamicValues, selectProjectShow, sendMidi, startShowSync } from "../helpers/showActions"
-import { playSlideRecording } from "../helpers/slideRecording"
+import { changeStageOutputLayout, startCamera, startScreen, startStreaming, stopStreaming, toggleOutputs } from "../helpers/output"
+import { OutputHelper } from "../helpers/OutputHelper"
+import { changeOutputStyle, playSlideTimers, randomSlide, replaceDynamicValues, selectProjectShow, sendMidi, startShowSync } from "../helpers/showActions"
 import { startTimerById, startTimerByName, stopTimers } from "../helpers/timerTick"
+import { muteOutput, unmuteOutput } from "../helpers/video"
 import { clearAll, clearBackground, clearDrawing, clearOverlay, clearOverlays, clearSlide, clearTimers, restoreOutput } from "../output/clear"
+import { fadePause, skipNext, skipPrev, spotifyPause, spotifyPlay } from "../output/preview/SpotifyManager"
 import { formatText } from "../show/formatTextEditor"
 import { getPlainEditorText } from "../show/getTextEditor"
+import { pauseTimeline, setTimelineTime, startTimeline, stopTimeline } from "../timeline/TimelinePlayback"
 import { runActionByName, runActionId, toggleAction } from "./actions"
-import {
-    getOutput,
-    getOutputGroupName,
-    getOutputSlideText,
-    getPlayingAudioData,
-    getPlayingAudioDuration,
-    getPlayingAudioTime,
-    getPlayingPlaylist,
-    getPlayingVideoDuration,
-    getPlayingVideoTime,
-    getPlaylists,
-    getProject,
-    getProjects,
-    getShow,
-    getShowLayout,
-    getShows,
-    getSlide,
-    getVariable,
-    getVariables
-} from "./apiGet"
+import { getOutput, getOutputGroupName, getOutputSlideText, getPlayingAudioData, getPlayingAudioDuration, getPlayingAudioTime, getPlayingPlaylist, getPlayingVideoDuration, getPlayingVideoState, getPlayingVideoTime, getPlaylists, getProject, getProjects, getShow, getShowLayout, getShows, getSlide, getVariable, getVariables } from "./apiGet"
 import {
     addGroup,
     addToProject,
@@ -53,6 +39,7 @@ import {
     deleteProject,
     editTimer,
     getClearedState,
+    getMediaLoopState,
     getPDFThumbnails,
     getPlainText,
     getShowGroups,
@@ -77,9 +64,11 @@ import {
     selectShowByName,
     selectSlideByIndex,
     selectSlideByName,
+    setNextSlideTimer,
     setShowAPI,
     setTemplate,
     startPlaylistByName,
+    startProjectItemByName,
     startScripture,
     stopAudio,
     stopTimerById,
@@ -87,6 +76,8 @@ import {
     timerSeekTo,
     toggleLock,
     toggleLogSongUsage,
+    toggleMediaLoop,
+    toggleMediaMute,
     updateVolumeValues,
     videoSeekTo
 } from "./apiHelper"
@@ -121,7 +112,8 @@ type API_id = { id: string }
 export type API_id_optional = { id?: string }
 type API_index = { index: number }
 type API_strval = { value: string }
-type API_volume = { volume?: number; gain?: number } // no values will mute/unmute
+type API_numval = { value: number }
+type API_volume = { volume?: number } // no values will mute/unmute
 export type API_id_index = { id: string; index: number }
 export type API_slide = { showId?: string | "active"; slideId?: string }
 export type API_slide_index = { showId?: string; layoutId?: string; index: number }
@@ -157,6 +149,9 @@ export type API_variable = {
     key?: "text" | "number" | "random_number" | "text_set" | "value" | "enabled" | "step" | "name" | "type" | "increment" | "decrement" | "expression" | "randomize" | "reset" | "next" | "previous" // default: "enabled"
     value?: string | number | boolean
     variableAction?: "increment" | "decrement"
+
+    text_set?: string
+    text_set_number?: number
 }
 
 export interface API_midi extends MidiValues {
@@ -170,6 +165,7 @@ export type API_metronome = {
     volume?: number
     // notesPerBeat?: number
     audioOutput?: string
+    audioChannel?: string
 }
 export type API_rest_command = {
     url: string
@@ -209,6 +205,8 @@ export const API_ACTIONS = {
     next_project_item: () => selectProjectShow("next"), // BC
     previous_project_item: () => selectProjectShow("previous"), // BC
     index_select_project_item: (data: API_index) => selectProjectShow(data.index), // BC
+    name_start_project_item: (data: API_strval) => startProjectItemByName(data.value),
+    mark_active_as_played: (data: API_toggle_specific) => markItemsAsPlayed("active", data.value),
 
     // SHOWS
     name_select_show: (data: API_strval) => selectShowByName(data.value), // BC
@@ -219,17 +217,18 @@ export const API_ACTIONS = {
     rearrange_groups: (data: API_rearrange) => rearrangeGroups(data),
     add_group: (data: API_group) => addGroup(data),
     set_template: (data: API_id) => setTemplate(data.id),
+    set_next_slide_timer: (data: API_numval) => setNextSlideTimer(data.value),
+    change_slide_timeline_speed: (data: API_numval) => slideTimelineSpeedMultiplier.set(data.value ?? 1),
     transpose_show_up: (data: API_id) => formatText(transposeText(getPlainEditorText(data.id), 1), data.id),
     transpose_show_down: (data: API_id) => formatText(transposeText(getPlainEditorText(data.id), -1), data.id),
 
     // PRESENTATION
-    next_slide: () => nextSlideIndividual({ key: "ArrowRight" }), // BC
-    previous_slide: () => previousSlideIndividual({ key: "ArrowLeft" }), // BC
+    next_slide: () => OutputHelper.advanceOutputs("next"), // BC
+    previous_slide: () => OutputHelper.advanceOutputs("previous"), // BC
     random_slide: () => randomSlide(),
     index_select_slide: (data: API_slide_index) => selectSlideByIndex(data), // BC
     name_select_slide: (data: API_strval) => selectSlideByName(data.value), // BC
     id_select_group: (data: API_id) => gotoGroup(data.id), // BC
-    start_slide_recording: () => playSlideRecording(),
 
     // CLEAR
     restore_output: () => restoreOutput(), // BC
@@ -238,7 +237,7 @@ export const API_ACTIONS = {
     clear_slide: () => clearSlide(), // BC
     clear_overlays: () => clearOverlays(), // BC
     clear_overlay: (data: API_id) => clearOverlay(data.id),
-    clear_audio: () => clearAudio(), // BC
+    clear_audio: () => clearAudio("", { clearPlaylist: true, commonClear: true }), // BC
     clear_next_timer: () => clearTimers(), // BC
     clear_drawing: () => clearDrawing(),
 
@@ -246,7 +245,10 @@ export const API_ACTIONS = {
     start_camera: (data: API_camera) => startCamera(data),
     start_screen: (data: API_screen) => startScreen(data),
     play_media: (data: API_media) => playMedia(data),
-    toggle_playing_media: () => togglePlayingMedia(),
+    toggle_playing_media: () => togglePlayingMedia(null, false, true),
+    toggle_media_loop: () => toggleMediaLoop(),
+    toggle_media_mute: () => toggleMediaMute(),
+    get_media_loop_state: () => getMediaLoopState(),
     video_seekto: (data: API_seek) => videoSeekTo(data), // BC
     // play / pause playing
 
@@ -262,13 +264,17 @@ export const API_ACTIONS = {
     scripture_previous: () => triggerFunction("scripture_previous"), // BC
 
     // OUTPUT
+    start_webrtc_stream: (data: API_id_optional) => startStreaming(data.id),
+    stop_webrtc_stream: (data: API_id_optional) => stopStreaming(data.id),
     lock_output: (data: API_output_lock) => toggleLock(data), // BC
-    toggle_output_windows: () => toggleOutputs(), // BC
-    toggle_output: (data: API_id) => toggleOutput(data.id),
+    toggle_output_windows: (data: API_toggle_specific = {}) => toggleOutputs(null, { state: data.value }), // BC
+    toggle_output: (data: API_toggle) => toggleOutputs([data.id], { state: data.value }),
     id_select_output_style: (data: API_id) => changeOutputStyle({ styleId: data.id }), // BC
     change_output_style: (data: API_output_style) => changeOutputStyle(data),
     change_stage_output_layout: (data: API_stage_output_layout) => changeStageOutputLayout(data),
     change_transition: (data: API_transition) => updateTransition(data), // BC
+    mute_output: (data: API_id) => muteOutput(data.id),
+    unmute_output: (data: API_id) => unmuteOutput(data.id),
 
     // STAGE
     id_select_stage_layout: (data: API_id) => moveStageConnection(data.id), // BC
@@ -278,12 +284,13 @@ export const API_ACTIONS = {
     pause_audio: (data: API_media) => pauseAudio(data),
     stop_audio: (data: API_media) => stopAudio(data),
     audio_seekto: (data: API_seek) => audioSeekTo(data), // BC
-    change_volume: (data: API_volume) => updateVolumeValues(data.volume ?? data.gain, data.gain !== undefined), // BC
+    change_volume: (data: API_volume) => updateVolumeValues(data.volume), // BC
     start_audio_stream: (data: API_id) => AudioPlayer.start(data.id, { name: "" }),
     start_playlist: (data: API_id) => AudioPlaylist.start(data.id),
     name_start_playlist: (data: API_strval) => startPlaylistByName(data.value), // BC
     playlist_next: () => AudioPlaylist.next(), // BC
     start_metronome: (data: API_metronome) => startMetronome(data),
+    start_audio_effect: (data: API_media) => playAudio(data),
 
     // TIMERS
     // control timer time
@@ -299,21 +306,40 @@ export const API_ACTIONS = {
     id_stop_timer: (data: API_id) => stopTimerById(data.id),
     name_stop_timer: (data: API_strval) => stopTimerByName(data.value),
 
+    // TIMELINE (SHOW)
+    start_timeline: () => startTimeline("show"),
+    stop_timeline: () => stopTimeline("show"),
+    pause_timeline: () => pauseTimeline("show"),
+    set_timeline_time: (data: API_seek) => setTimelineTime("show", data.seconds * 1000),
+
     // FUNCTIONS
     change_variable: (data: API_variable) => changeVariable(data), // BC
-    start_trigger: (data: API_id) => activateTriggerSync(data.id),
 
     // DRAW
     change_draw_zoom: (data: API_draw_zoom) => changeDrawZoom(data),
 
     // CONNECTION
-    sync_drive: () => syncDrive(true),
     sync_content_provider: () => contentProviderSync(),
+    // sync_cloud_now
 
     // EMIT
     send_midi: (data: API_midi) => sendMidi(data), // DEPRECATED, use emit_action instead
     send_rest_command: (data: API_rest_command) => sendRestCommandSync(data), // DEPRECATED, use emit_action instead
     emit_action: (data: API_emitter) => emitData(data),
+
+    // OBS Studio
+    obs_set_scene: (data: API_id) => obsSetScene(data.id),
+    obs_start_livestream: () => obsStartLivestream(),
+    obs_stop_livestream: () => obsStopLivestream(),
+    obs_start_recording: () => obsStartRecording(),
+    obs_stop_recording: () => obsStopRecording(),
+
+    // Spotify
+    spotify_play: () => spotifyPlay(),
+    spotify_pause: () => spotifyPause(),
+    spotify_fade_out: () => fadePause(),
+    spotify_next: () => skipNext(),
+    spotify_previous: () => skipPrev(),
 
     // OTHER
     toggle_log_song_usage: (data: API_toggle_specific) => toggleLogSongUsage(data),
@@ -352,6 +378,7 @@ export const API_ACTIONS = {
     get_dynamic_value: (data: API_dynamic_value) => replaceDynamicValues(data.value, data.ref || {}),
 
     get_playing_video_duration: () => getPlayingVideoDuration(),
+    get_playing_video_state: () => getPlayingVideoState(),
     get_playing_video_time: () => getPlayingVideoTime(),
     get_playing_video_time_left: () => getPlayingVideoDuration() - getPlayingVideoTime(),
     get_playing_audio_duration: () => getPlayingAudioDuration(),

@@ -6,16 +6,25 @@ import type { SaveData } from "../../types/Save"
 import { currentlyDeletedShows } from "../cloud/drive"
 import { startBackup } from "../data/backup"
 import { defaultSettings, defaultSyncedSettings } from "../data/defaults"
-import { _store } from "../data/store"
+import { _store, safeStoreSet } from "../data/store"
 import { sendMain, sendToMain } from "../IPC/main"
 import { deleteFile, doesPathExist, getDataFolderPath, parseShow, readFile, writeFile } from "../utils/files"
-import { clone, wait } from "../utils/helpers"
+import { checkIfMatching, clone, wait } from "../utils/helpers"
 import { renameShows } from "../utils/shows"
 
 let isSaving = false
 export async function save(data: SaveData) {
     if (isSaving) return
     isSaving = true
+
+    // auto backup right after startup does not need to write again
+    const isAutoBackupOnly = !!data.customTriggers?.backup && !!data.customTriggers?.isAutoBackup && !data.customTriggers?.autosave && !data.closeWhenFinished
+    if (isAutoBackupOnly) {
+        startBackup({ customTriggers: data.customTriggers })
+        sendToMain(ToMain.SAVE2, { closeWhenFinished: false, customTriggers: data.customTriggers })
+        isSaving = false
+        return
+    }
 
     const reset = !!data.customTriggers?.reset
     if (reset) {
@@ -24,21 +33,31 @@ export async function save(data: SaveData) {
     }
 
     // save to files
-    Object.entries(_store).forEach(storeData as any)
-    function storeData([key, store]: [keyof typeof _store, any]) {
-        if (!(data as any)[key] || checkIfMatching(store.store, (data as any)[key])) return
+    for (const entry of Object.entries(_store)) {
+        await storeData(entry as any)
+    }
+    async function storeData([key, store]: [keyof typeof _store, any]) {
+        const newData = (data as any)[key]
+        if (!newData || !isValidJSON(newData)) return
 
-        store.clear()
-        store.set((data as any)[key])
+        let currentData
+        try {
+            currentData = store.store
+        } catch {
+            currentData = {}
+        }
+        if (checkIfMatching(currentData, newData)) return
 
-        if (reset) sendMain(key as Main, (data as any)[key])
+        await safeStoreSet(store, newData, key)
+
+        if (reset) sendMain(key as Main, newData)
     }
 
     // scriptures
     const scriptureFolderPath = getDataFolderPath("scriptures")
     if (data.scripturesCache) Object.entries(data.scripturesCache).forEach(saveScripture)
     function saveScripture([id, value]: [string, Bible]) {
-        if (!value) return
+        if (!value || !isValidJSON(value)) return
         const filePath: string = path.join(scriptureFolderPath, value.name + ".fsb")
         writeFile(filePath, JSON.stringify([id, value]), id)
     }
@@ -47,16 +66,13 @@ export async function save(data: SaveData) {
     // rename shows
     if (data.renamedShows) {
         const renamedShows = data.renamedShows.filter(({ id }: { id: string }) => !data.deletedShows?.find((a) => a.id === id))
-        renameShows(renamedShows, showsPath)
-        // rename should be sync, but sometimes it might not be finished right away
-        // so add some extra wait time just in case
-        await wait(200)
+        await renameShows(renamedShows, showsPath)
     }
 
     // shows
     if (data.showsCache) Object.entries(data.showsCache).forEach(saveShow)
     function saveShow([id, value]: [string, any]) {
-        if (!value) return
+        if (!value || !isValidJSON(value)) return
         const filePath: string = path.join(showsPath, String(value.name || id) + ".show")
         writeFile(filePath, JSON.stringify([id, value]), id)
     }
@@ -82,7 +98,7 @@ export async function save(data: SaveData) {
 
     // SAVED
 
-    if (data.customTriggers?.backup || data.customTriggers?.reset) startBackup({ customTriggers: data.customTriggers })
+    if (data.customTriggers?.backup) startBackup({ customTriggers: data.customTriggers })
 
     if (data.closeWhenFinished) await wait(300) // make sure files are written before closing
     if (!reset) sendToMain(ToMain.SAVE2, { closeWhenFinished: data.closeWhenFinished, customTriggers: data.customTriggers })
@@ -90,7 +106,11 @@ export async function save(data: SaveData) {
     isSaving = false
 }
 
-// a few keys might not be placed in the same order in JS object vs store file
-function checkIfMatching(a: object, b: object): boolean {
-    return JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort())
+function isValidJSON(object: any) {
+    try {
+        JSON.stringify(object)
+        return true
+    } catch {
+        return false
+    }
 }

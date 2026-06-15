@@ -7,6 +7,7 @@ import { _show } from "../../helpers/shows"
 import { showsCache } from "./../../../stores"
 import { customActionActivation } from "../../actions/actions"
 import { joinTimeBig } from "../../helpers/time"
+import { getDynamicValue } from "../../edit/scripts/itemHelpers"
 
 const typeOrder = { counter: 1, clock: 2, event: 3 }
 export function getSortedTimers(updater = get(timers), options: { showHours?: boolean; firstActive?: boolean }) {
@@ -57,11 +58,12 @@ export function createGlobalTimerFromLocalTimer(showId: string | undefined) {
 
     Object.keys(currentShow.slides).forEach(checkSlide)
     function checkSlide(slideId) {
-        const items: any[] = currentShow.slides[slideId].items
+        const items: any[] = currentShow.slides[slideId]?.items
+        if (!Array.isArray(items)) return
 
         // TODO: "backup" global timer to show item.timer
 
-        let timerIndex = items.findIndex((a) => !a?.timerId && a?.timer)
+        let timerIndex = items.findIndex((a) => !a?.timerId && a?.timer && !a?.timer?.id)
         while (timerIndex >= 0) {
             timerCreated = true
             const globalTimerId = uid()
@@ -92,19 +94,21 @@ export function createGlobalTimerFromLocalTimer(showId: string | undefined) {
 }
 
 const ONE_HOUR = 3600000 // 60 * 60 * 1000
-export function getCurrentTimerValue(timer: Timer, ref: any, today: Date, updater = get(activeTimers)) {
+export function getCurrentTimerValue(timer: Timer, ref: any, today: Date, updater = get(activeTimers), _updater: any = null) {
     let currentTime = 0
     if (!timer) return currentTime
 
     if (timer.type === "counter") {
         currentTime = updater.filter((a) => a.id === ref.id)[0]?.currentTime
-        if (typeof currentTime !== "number") currentTime = timer.start!
+        if (typeof currentTime !== "number") {
+            currentTime = timer.startDynamic !== undefined ? (getTimerDynamicValue(timer.startDynamic) ?? 0) : timer.start || 0
+        }
     } else if (timer.type === "clock") {
         currentTime = getTimeUntilClock(timer.time!, today)
     } else if (timer.type === "event") {
         let currentEvent = get(events)[timer.event || ""] || {}
         // if repeating event & has passed more than an hour ago
-        if (currentEvent.group && (new Date(currentEvent.from)?.getTime() || 0) < (today.getTime() - ONE_HOUR)) {
+        if (currentEvent.group && (new Date(currentEvent.from)?.getTime() || 0) < today.getTime() - ONE_HOUR) {
             const newEvent = getClosestUpcommingEvent(currentEvent.group)
             if (newEvent) currentEvent = newEvent
         }
@@ -118,16 +122,32 @@ export function getCurrentTimerValue(timer: Timer, ref: any, today: Date, update
     return currentTime
 }
 
+export function getTimerDynamicValue(val: string | undefined, _updater: any = null) {
+    if (val === undefined || val === "") return null
+
+    if (val.startsWith("{")) val = getDynamicValue(val)
+    if (val.startsWith("{")) return 0
+
+    try {
+        val = new Function(`return ${val}`)()
+    } catch {
+        // invalid expression
+        return isNaN(Number(val)) ? 0 : Number(val)
+    }
+
+    return isNaN(Number(val)) ? 0 : Number(val)
+}
+
 function getClosestUpcommingEvent(eventGroup: string) {
-    const eventsList = keysToID(get(events)).filter(a => a.group === eventGroup)
+    const eventsList = keysToID(get(events)).filter((a) => a.group === eventGroup)
     if (!eventsList.length) return null
 
     const today = Date.now()
 
     let closestTime = 0
     let closestId = ""
-    eventsList.forEach(a => {
-        const currentTime = (new Date(a?.from)?.getTime() || 0)
+    eventsList.forEach((a) => {
+        const currentTime = new Date(a?.from)?.getTime() || 0
         if (currentTime > today && (!closestTime || currentTime < closestTime)) {
             closestTime = currentTime
             closestId = a.id
@@ -156,7 +176,10 @@ export function playPauseGlobal(id: any, timer: any, forcePlay = false, pausedSt
     const index = get(activeTimers).findIndex((a) => a.id === id)
 
     activeTimers.update((a) => {
-        if (index < 0) a.push({ ...timer, id, currentTime: timer?.start || 0, paused: pausedState === null ? false : pausedState })
+        let startTime = timer?.start || 0
+        if (timer.startDynamic !== undefined) startTime = getTimerDynamicValue(timer.startDynamic) ?? 0
+
+        if (index < 0) a.push({ ...timer, id, currentTime: startTime, paused: pausedState === null ? false : pausedState })
         else {
             if (pausedState === null) a[index].paused = forcePlay ? false : !a[index].paused
             else a[index].paused = pausedState

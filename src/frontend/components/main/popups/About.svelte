@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { version } from "../../../stores"
+    import { activePopup, version } from "../../../stores"
     import T from "../../helpers/T.svelte"
     import Link from "../../inputs/Link.svelte"
+    import MaterialButton from "../../inputs/MaterialButton.svelte"
 
     const assets: { [key: string]: string } = {
         "CMG Sans (Custom font)": "https://www.churchmotiongraphics.com/cmg-sans/",
@@ -16,7 +17,7 @@
         "Express (Web framework)": "https://expressjs.com/",
         "NDI® SDK (IP-streaming)": "https://ndi.video/",
         "CAPTION.Ninja (Live captions)": "https://caption.ninja/",
-        "Google Translate (Localization)": "https://translate.google.com/",
+        "Google Translate (Localization)": "https://translate.google.com/"
     }
 </script>
 
@@ -27,10 +28,10 @@
     </div>
 
     <p style="font-size: 0.8em;margin-top: 2px;">
-        <span style="opacity: 0.8;">v{$version} -</span>
-        <Link url={"https://freeshow.app/?v" + $version}>
+        <span style="opacity: 0.8;">v{$version}</span>
+        <MaterialButton variant="outlined" style="margin-left: 5px;display: inline-flex;min-height: 0;padding: 0 5px;vertical-align: baseline;" on:click={() => activePopup.set("update_manager")} white>
             <T id="about.check_updates" />
-        </Link>
+        </MaterialButton>
     </p>
 
     <!-- <p>
@@ -43,23 +44,23 @@
 <div class="main">
     <div class="text">
         <div>
-            ● <T id="about.more" />
+            • <T id="about.more" />
             <Link url="https://churchapps.org/">ChurchApps</Link>
         </div>
         <div>
-            ● <T id="about.report" />
+            • <T id="about.report" />
             <Link url="https://github.com/ChurchApps/FreeShow/issues">GitHub Issues</Link>
         </div>
         <div>
-            ● <T id="about.translate" />
+            • <T id="about.translate" />
             <Link url="https://app.transifex.com/nettbiter/freeshow/">Transifex</Link>
         </div>
         <!-- <div>
-            ● <T id="about.mail" />
+            • <T id="about.mail" />
             <Link url="mailto:dev@freeshow.app">dev@freeshow.app</Link>
         </div> -->
         <div>
-            ● <T id="about.support" />!
+            • <T id="about.support" />!
             <Link url="https://churchapps.org/partner#give">churchapps.org/partner</Link>
         </div>
     </div>

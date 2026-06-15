@@ -113,11 +113,13 @@
                                 <MaterialButton title="actions.delete" on:click={() => deleteItem(i)}>
                                     <Icon id="delete" white />
                                 </MaterialButton>
-                            </InputRow>
 
-                            {#if openedMenus[i] && editContent}
-                                <EditValues sections={editContent} {item} on:change={(e) => valueChanged(e.detail, i)} />
-                            {/if}
+                                <svelte:fragment slot="menu">
+                                    {#if editContent}
+                                        <EditValues sections={editContent} {item} on:change={(e) => valueChanged(e.detail, i)} />
+                                    {/if}
+                                </svelte:fragment>
+                            </InputRow>
                         {/each}
                     {/key}
                 </div>
@@ -146,6 +148,7 @@
                     value={currentEffect.background}
                     on:input={(e) => {
                         effects.update((a) => {
+                            if (!a[effectId]) return a
                             a[effectId].background = e.detail
                             return a
                         })

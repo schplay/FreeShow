@@ -1,7 +1,7 @@
 <script lang="ts">
     import { fade, scale } from "svelte/transition"
     import type { Popups } from "../../../types/Main"
-    import { activePopup, os, special } from "../../stores"
+    import { activePopup, alertMessage, os, popupData, special } from "../../stores"
     import { MENU_BAR_HEIGHT } from "../../utils/common"
     import { popups } from "../../utils/popup"
     import { disablePopupClose } from "../../utils/shortcuts"
@@ -9,7 +9,9 @@
     import MaterialButton from "../inputs/MaterialButton.svelte"
 
     function mousedown(e: any) {
+        // same logic for Escape in shortcuts.ts
         if (popupId && disablePopupClose.includes(popupId)) return
+        if (popupId === "alert" && $alertMessage === "actions.closing") return
 
         if (e.target.classList.contains("popup")) activePopup.set(null)
     }
@@ -21,10 +23,11 @@
     function updatePopup() {
         if (popupTimeout) return
 
+        popupId = $activePopup
         popupTimeout = setTimeout(() => {
-            popupId = $activePopup
             popupTimeout = null
-        }, 100)
+            if (popupId !== $activePopup) updatePopup()
+        }, 250)
     }
 
     $: isWindows = $os.platform === "win32"
@@ -40,15 +43,21 @@
 
 {#if popupId !== null}
     {#key popupId}
-        <div style={isWindows ? `height: calc(100% - ${MENU_BAR_HEIGHT}px);` : null} class="popup" class:isOptimized transition:fade={{ duration: 100 }} on:mousedown={mousedown}>
+        <div style={isWindows ? `height: calc(100% - ${MENU_BAR_HEIGHT}px);` : null} class="popup" class:isOptimized transition:fade={{ duration: isOptimized ? 20 : 100 }} on:mousedown={mousedown}>
             <!-- class:fill={popupId === "import_scripture"} -->
-            <div class="card" transition:scale={{ duration: 200 }}>
+            <div class="card" transition:scale={{ duration: isOptimized ? 50 : 200 }}>
                 {#if popupId !== "alert"}
                     <div class="headerContent" style="border-bottom: 1px solid var(--primary-lighter);{scrolled ? 'box-shadow: 2px 2px 4px 5px rgb(0 0 0 / 0.1);' : ''}">
                         <div class="headerMargin">
                             {#key popupId}
                                 <!-- margin-top: -5px; -->
-                                <h2 style="font-size: 1.3em;margin-top: -2px;"><T id="popup.{popupId}" /></h2>
+                                <h2 style="font-size: 1.3em;margin-top: -2px;">
+                                    {#if popupId === "new_update"}
+                                        <T id="about.new_update" />: <span style="color: var(--secondary);">v{$popupData.latestVersion}</span>
+                                    {:else}
+                                        <T id="popup.{popupId}" />
+                                    {/if}
+                                </h2>
                             {/key}
 
                             {#if !disablePopupClose.includes(popupId)}

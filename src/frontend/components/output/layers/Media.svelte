@@ -13,6 +13,7 @@
     export let mediaStyle: MediaStyle = {}
     export let mirror = false
 
+    export let volume = 1
     export let video: HTMLVideoElement | null = null
     export let videoData: any = { paused: false, muted: true, duration: 0, loop: false }
     export let videoTime = 0
@@ -20,7 +21,7 @@
     $: extension = getExtension(path)
     $: type = data.type || getMediaType(extension)
 
-    $: if (path.includes("http")) download()
+    $: if (typeof path === "string" && path.startsWith("http")) download()
     async function download() {
         path = await downloadOnlineMedia(path)
     }
@@ -50,7 +51,7 @@
 {#key retryCount}
     {#if type === "video"}
         <div class="video">
-            <Video {path} bind:video bind:videoData bind:videoTime startAt={data.startAt} {mediaStyle} {animationStyle} {mirror} on:loaded on:ended on:error={reload} />
+            <Video {path} bind:video bind:videoData bind:videoTime startAt={data.startAt} {mediaStyle} {animationStyle} {mirror} {volume} on:loaded on:ended on:error={reload} />
         </div>
     {:else if type === "image"}
         <div class="image" style="height: 100%;{animationStyle}">

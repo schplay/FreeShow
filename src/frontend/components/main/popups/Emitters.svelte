@@ -6,6 +6,7 @@
     import { activePopup, emitters, popupData } from "../../../stores"
     import { emitterData, formatData } from "../../actions/emitters"
     import MidiValues from "../../actions/MidiValues.svelte"
+    import { getDynamicValue } from "../../edit/scripts/itemHelpers"
     import { clone, keysToID, sortByName } from "../../helpers/array"
     import T from "../../helpers/T.svelte"
     import DynamicList from "../../input/DynamicList.svelte"
@@ -51,7 +52,7 @@
     }
 
     function createEmitter() {
-        let id = createId ?? uid()
+        let id = createId || uid()
         emitters.update((a) => {
             a[id] = clone(DEFAULT_EMITTER)
             return a
@@ -155,7 +156,7 @@
         if (signalInputs[0].type !== "dropdown" || signalInputs[0].options[0]?.value) return
 
         requestMain(Main.GET_MIDI_OUTPUTS, undefined, (data) => {
-            if (!data.length || signalInputs[0].type !== "dropdown") return
+            if (!data?.length || signalInputs[0].type !== "dropdown") return
 
             signalInputs[0].options = data.map((a) => ({ value: a.name, label: a.name, ...a }))
             if (!emitter?.signal?.output) updateValue("signal", { output: data[0].name })
@@ -198,7 +199,7 @@
 
     {#if dataPreview}
         <div class="preview">
-            {dataPreview}
+            {getDynamicValue(dataPreview)}
         </div>
     {/if}
 {:else if editEmitter && emitter}

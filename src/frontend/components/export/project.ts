@@ -13,7 +13,7 @@ import { loadShows } from "../helpers/setShow"
 import { formatToFileName } from "../helpers/show"
 import { _show } from "../helpers/shows"
 
-export async function exportProject(project: Project, projectId: string) {
+export async function exportProject(project: Project, projectId: string, savePath?: string) {
     if (!project) return
 
     const shows: Shows = {}
@@ -27,6 +27,7 @@ export async function exportProject(project: Project, projectId: string) {
     const parentFolder = get(folders)[project.parent]?.name || ""
     if (projectId) project.id = projectId
     project.parent = "/" // place on root
+    delete project.sourcePath
 
     // project items
     const getProjectItems = {
@@ -57,10 +58,10 @@ export async function exportProject(project: Project, projectId: string) {
             })
 
             // get media file paths
-            const mediaData = _show(showRef.id).get("media")
+            const mediaData = _show(showRef.id).get("media") || {}
             mediaIds.forEach((id) => {
                 const path = mediaData[id]?.path || mediaData[id]?.id
-                if (!path || path.includes("http")) return
+                if (!path || path.startsWith("http")) return
                 getFile(path)
             })
 
@@ -91,13 +92,14 @@ export async function exportProject(project: Project, projectId: string) {
         }
     }
 
-    const projectItems = project.shows
+    const projectItems = clone(project.shows || [])
+    projectItems.forEach((showRef) => delete showRef.played)
 
     // load shows
     const showIds = projectItems.filter((a) => (a.type || "show") === "show").map((a) => a.id)
     await loadShows(showIds)
 
-    projectItems.map(getItem)
+    projectItems.forEach(getItem)
 
     // remove duplicates
     files = [...new Set(files)]
@@ -116,14 +118,17 @@ export async function exportProject(project: Project, projectId: string) {
             if (!get(media)[path]) return
 
             const data = clone(get(media)[path])
+
             // delete data.info
+            delete data.creationTime // no need to transport this
+
             mediaData[path] = data
         })
         if (Object.keys(mediaData).length) projectData.media = mediaData
     }
 
     // export to file
-    send(EXPORT, ["GENERATE"], { type: "project", name: formatToFileName(project.name), file: projectData })
+    send(EXPORT, ["GENERATE"], { type: "project", name: formatToFileName(project.name), file: projectData, path: savePath })
 
     function getItem(showRef: ProjectShowRef) {
         const type = showRef.type || "show"
@@ -147,7 +152,7 @@ export async function exportProject(project: Project, projectId: string) {
         overlays[id] = clone(get(overlayStores)[id])
 
         // get media data from overlay "Media" items
-        get(overlayStores)[id].items.forEach((item) => {
+        get(overlayStores)[id].items?.forEach((item) => {
             if (item.type === "media" && item.src) {
                 getFile(item.src)
             }

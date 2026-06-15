@@ -1,17 +1,19 @@
 <script lang="ts">
-    import { onDestroy } from "svelte"
     import { uid } from "uid"
     import { Main } from "../../../../types/IPC/Main"
-    import type { ClickEvent } from "../../../../types/Main"
-    import { destroyMain, receiveMain, sendMain } from "../../../IPC/main"
+    import type { ClickEvent, FileFolder } from "../../../../types/Main"
+    import { requestMain } from "../../../IPC/main"
+    import { AudioPlayer } from "../../../audio/audioPlayer"
     import { AudioPlaylist } from "../../../audio/audioPlaylist"
+    import { addProjectItem } from "../../../converters/project"
     import { activePlaylist, activePopup, activeRename, audioFolders, audioPlaylists, drawerTabsData, effectsLibrary, labelsDisabled, media, outLocked, selectAllAudio, selected } from "../../../stores"
     import { translateText } from "../../../utils/language"
     import Icon from "../../helpers/Icon.svelte"
     import T from "../../helpers/T.svelte"
-    import { clone, sortByName } from "../../helpers/array"
+    import { clone, keysToID, sortFilenames } from "../../helpers/array"
     import { splitPath } from "../../helpers/get"
-    import { getFileName, getMediaType } from "../../helpers/media"
+    import { getExtension, getFileName, getMediaType } from "../../helpers/media"
+    import { joinTime, secondsToTime } from "../../helpers/time"
     import FloatingInputs from "../../input/FloatingInputs.svelte"
     import MaterialButton from "../../inputs/MaterialButton.svelte"
     import MaterialNumberInput from "../../inputs/MaterialNumberInput.svelte"
@@ -29,115 +31,183 @@
 
     type File = { path: string; name: string; extension?: string; folder?: boolean; favourite?: boolean; audio?: boolean }
 
-    let files: File[] = []
+    // let files: File[] = []
     let scrollElem: HTMLElement | undefined
 
     let playlistSettings = false
 
     $: playlist = active && $audioPlaylists[active]
 
-    $: isDefault = ["all", "favourites", "effects_library", "microphones", "audio_streams", "metronome"].includes(active || "")
+    $: isDefault = ["all", "favourites", "effects_library", "inputs", "metronome"].includes(active || "")
     $: rootPath = isDefault || playlist ? "" : active !== null ? $audioFolders[active]?.path || "" : ""
     $: path = isDefault || playlist ? "" : rootPath
-    $: name =
-        active === "all"
-            ? "category.all"
-            : active === "favourites"
-              ? "category.favourites"
-              : active === "effects_library"
-                ? "category.sound_effects"
-                : rootPath === path
-                  ? active !== "microphones" && active !== "audio_streams" && active !== "metronome" && active !== null
-                      ? $audioFolders[active]?.name || ""
-                      : ""
-                  : splitPath(path).name
+    $: name = active === "all" ? "category.all" : active === "favourites" ? "category.favourites" : active === "effects_library" ? "category.sound_effects" : rootPath === path ? (active !== "inputs" && active !== "metronome" && active !== null ? $audioFolders[active]?.name || "" : "") : splitPath(path).name
 
     // get list of files & folders
     let prevActive: null | string = null
-    $: {
+    $: if (active || path) updateContent()
+    function updateContent() {
         if (active === "favourites") {
             prevActive = active
-            files = Object.entries($media)
-                .map(([path, a]) => {
-                    let p = splitPath(path)
-                    let name = p.name
-                    return { path, favourite: a.favourite === true, name, extension: p.extension, audio: a.audio === true }
-                })
-                .filter((a) => a.favourite === true && a.audio === true)
 
-            // filterFiles()
-            scrollElem?.scrollTo(0, 0)
+            allRelevantFiles = keysToID($media)
+                .filter((a) => a.favourite === true && a.audio === true)
+                .map((a) => {
+                    return { isFolder: false, path: a.id, name: getFileName(a.id), stats: {} as any }
+                })
+
+            openFolder("favourites")
         } else if (active === "effects_library") {
             prevActive = active
-            files = clone($effectsLibrary)
 
-            scrollElem?.scrollTo(0, 0)
+            allRelevantFiles = $effectsLibrary.map((a) => {
+                return { isFolder: false, path: a.path, name: a.name, stats: {} as any }
+            })
+
+            openFolder("effects_library")
         } else if (active === "all") {
-            if (active !== prevActive) {
-                prevActive = active
-                files = []
-                Object.values($audioFolders).forEach((data) => sendMain(Main.READ_FOLDER, { path: data.path!, disableThumbnails: true }))
-            }
+            if (active === prevActive) return
+            prevActive = active
+
+            requestFiles(Object.values($audioFolders).map((a) => a.path!))
         } else if (path.length) {
-            if (path !== prevActive) {
-                prevActive = path
-                files = []
-                sendMain(Main.READ_FOLDER, { path, listFilesInFolders: true, disableThumbnails: true })
-            }
+            if (path === prevActive) return
+            prevActive = path
+
+            requestFiles(path)
         } else {
-            // microphones & audio_streams & metronome
+            // inputs & metronome
             prevActive = active
         }
     }
 
-    let filesInFolders: { id: string; name: string }[] = []
-    let folderFiles: { [key: string]: string[] } = {}
+    let foldersList: FileFolder[] = []
+    let filesList: FileFolder[] = []
+    let allRelevantFiles: FileFolder[] = []
 
-    let listenerId = receiveMain(Main.READ_FOLDER, (data) => {
-        filesInFolders = sortByName(data.filesInFolders || [])
+    let requesting = 0
+    let currentDepth = 0
+    async function requestFiles(path: string | string[], depth: number = 0) {
+        if (!path) return
 
-        if (active !== "all" && data.path !== path) return
+        currentDepth = depth
 
-        files.push(...data.files.filter((file) => getMediaType(file.extension) === "audio" || (active !== "all" && file.folder)))
-        files = sortByName(files).sort((a, b) => (a.folder === b.folder ? 0 : a.folder ? -1 : 1))
+        requesting++
+        let currentRequest = requesting
+        const data = await requestMain(Main.READ_FOLDER, { path, depth })
+        if (!data || requesting !== currentRequest) return
 
-        files = files.map((a) => ({ ...a, path: a.folder ? a.path : a.path }))
-
-        // set valid files in folder
-        folderFiles = {}
-        Object.keys(data.folderFiles).forEach((path) => {
-            folderFiles[path] = data.folderFiles[path].filter((file) => file.folder || getMediaType(file.extension) === "audio")
+        allRelevantFiles = Object.values(data).filter((a) => {
+            // remove folders with no content
+            if (a.isFolder) return a.files.length > 0
+            // only audio files
+            return getMediaType(getExtension(a.name)) === "audio"
         })
 
-        // remove folders with no content
-        files = files.filter((a) => !a.folder || !folderFiles[a.path] || folderFiles[a.path].length > 0)
+        openFolder(active === "all" ? "all" : (path as string))
+    }
 
-        // filterFiles()
+    function openFolder(path: string) {
+        if (path === "all" || path === "favourites" || path === "effects_library") {
+            foldersList = []
+            filesList = allRelevantFiles.filter((a) => !a.isFolder)
+
+            filterFiles()
+            return
+        }
+
+        if (searchValue.length > 1) {
+            foldersList = allRelevantFiles.filter((a) => a.isFolder)
+            filesList = allRelevantFiles.filter((a) => !a.isFolder)
+
+            filterFiles()
+            return
+        }
+
+        const folder = allRelevantFiles.find((a) => a.isFolder && a.path === path)
+        if (!folder) return
+
+        foldersList = allRelevantFiles.filter((a) => a.isFolder && (folder as any).files.includes(a.path))
+        filesList = allRelevantFiles.filter((a) => !a.isFolder && (folder as any).files.includes(a.path))
+
+        filterFiles()
+    }
+
+    // $: if ($sorted) filterFiles()
+    $: if (searchValue !== undefined) filterSearch()
+
+    let filteredFiles: FileFolder[] = []
+    function filterFiles() {
+        if (active === "inputs" || active === "metronome") return
+
+        let localFilteredFiles: FileFolder[] = sortFilenames(filesList)
+
+        // sort
+        // let sortType = $sorted.media?.type || "name"
+        // if (sortType === "name") localFilteredFiles = sortFilenames(localFilteredFiles)
+        // else if (sortType === "name_des") localFilteredFiles = localFilteredFiles.reverse()
+        // else if (sortType === "created") localFilteredFiles = localFilteredFiles.sort((a, b) => (a.isFolder || b.isFolder ? 1 : b.stats.birthtimeMs - a.stats.birthtimeMs))
+        // else if (sortType === "modified") localFilteredFiles = localFilteredFiles.sort((a, b) => (a.isFolder || b.isFolder ? 1 : b.stats.mtimeMs - a.stats.mtimeMs))
+
+        // append folders
+        localFilteredFiles = [...sortFilenames(foldersList), ...localFilteredFiles]
+
+        filteredFiles = clone(localFilteredFiles)
+        if (searchValue.length < 2) searchedFiles = clone(filteredFiles)
+        else filterSearch()
+
+        // scroll to top
         scrollElem?.scrollTo(0, 0)
-    })
-    onDestroy(() => destroyMain(listenerId))
+    }
 
     // search
-    $: if (searchValue !== undefined || files) filterSearch()
+    $: if (searchValue !== undefined) filterSearch()
     const filter = (s: string) => s.toLowerCase().replace(/[.,\/#!?$%\^&\*;:{}=\-_`~()]/g, "")
-    let fullFilteredFiles: any[] = []
-    function filterSearch() {
-        fullFilteredFiles = clone(files)
-        if (searchValue.length > 1) fullFilteredFiles = [...fullFilteredFiles, ...filesInFolders].filter((a) => filter(a.name).includes(filter(searchValue)))
+    let searchFilterActive = false
+    let searchedFiles: FileFolder[] = []
+    async function filterSearch() {
+        if (searchFilterActive) return
+        searchFilterActive = true
+
+        if (searchValue.length === 1) {
+            searchFilterActive = false
+            return
+        }
+        if (searchValue.length < 2) {
+            if (active !== "all" && active !== "favourites") requestFiles(path)
+            else searchedFiles = clone(filteredFiles)
+            searchFilterActive = false
+            return
+        }
+
+        if (active !== "all" && active !== "favourites" && currentDepth < 5) {
+            await requestFiles(path, 5)
+        }
+
+        searchedFiles = clone(filteredFiles).filter((a) => filter(a.name).includes(filter(searchValue)))
 
         // scroll to top
         document.querySelector("svelte-virtual-list-viewport")?.scrollTo(0, 0)
+
+        searchFilterActive = false
     }
 
     function keydown(e: KeyboardEvent) {
-        // if (e.key === "Enter" && searchValue.length > 1 && e.target.closest(".search")) {
-        //   if (fullFilteredFiles.length) {
-        //     let file = fullFilteredFiles[0]
-        //     activeShow.set({ id: file.path, name: file.name, type: $videoExtensions.includes(file.extension) ? "video" : "image" })
-        //     activeFile = filteredFiles.findIndex((a) => a.path === file.path)
-        //     if (activeFile < 0) activeFile = null
-        //   }
-        // }
+        if (e.key === "Enter" && searchValue.length > 1 && e.target?.closest(".search")) {
+            let file = searchedFiles.filter((a) => !a.isFolder)[0]
+            if (!file) return
+
+            // play
+            if (e.ctrlKey || e.metaKey) {
+                AudioPlayer.start(file.path, { name: file.name })
+                return
+            }
+
+            // add to project
+            const data = { id: file.path, name: file.name, type: "audio" as const }
+            addProjectItem(data)
+            return
+        }
 
         if (e.target?.closest("input") || e.target?.closest(".edit")) return
 
@@ -162,8 +232,8 @@
 
     function createPlaylist(e: ClickEvent) {
         let playlistName = ""
-        let files = fullFilteredFiles.filter((a) => !a.folder)
-        if (selectedFiles.length) files = selectedFiles
+        let files: { path: string; name: string }[] = filteredFiles.filter((a) => !a.isFolder)
+        if (selectedFiles.length) files = selectedFiles.map((a) => ({ path: a.path, name: a.name }))
 
         if (e.detail.ctrl) {
             files = []
@@ -195,10 +265,19 @@
     // select all
     $: if ($selectAllAudio) selectAll()
     function selectAll() {
-        let data = (playlist ? playlist.songs : fullFilteredFiles)
-            .filter((a) => (playlist ? true : a.extension))
-            .map((file, index) => {
-                if (playlist) return { path: file, name: getFileName(file), index }
+        if (playlist) {
+            let data = playlist.songs.map((file, index) => {
+                return { path: file, name: getFileName(file), index }
+            })
+
+            selected.set({ id: "audio", data })
+            selectAllAudio.set(false)
+            return
+        }
+
+        let data = filteredFiles
+            .filter((a) => getExtension(a.name))
+            .map((file) => {
                 return { path: file.path, name: file.name, index: -1 }
             })
 
@@ -207,16 +286,57 @@
     }
 
     $: pathString = path.replace(rootPath, "").replace(name, "").replaceAll("\\", "/").split("/").filter(Boolean).join("/")
+
+    let updater = 1
+    $: if (active) {
+        setTimeout(update, 500)
+        setTimeout(update, 2000) // double check
+    }
+    function update() {
+        updater++
+    }
+
+    let inputsTab = $drawerTabsData.audio?.openedSubSubTab?.microphones || "microphones"
+
+    function setSubSubTab(id: string) {
+        if (!active) return
+
+        drawerTabsData.update((a) => {
+            if (!a.audio) a.audio = { enabled: true, activeSubTab: active }
+            if (!a.audio.openedSubSubTab) a.audio.openedSubSubTab = {}
+            a.audio.openedSubSubTab[active] = id
+            return a
+        })
+
+        if (active === "inputs") inputsTab = id
+    }
 </script>
 
 <svelte:window on:keydown={keydown} />
 
-<div class="scroll" style="flex: 1;overflow-y: auto;" class:full={active === "audio_streams" || active === "effects_library"} bind:this={scrollElem}>
-    <div class="grid" style={active !== "audio_streams" && active !== "effects_library" && (playlist ? playlist.songs.length : fullFilteredFiles.length) ? "" : "height: 100%;"}>
-        {#if active === "microphones"}
-            <Microphones />
-        {:else if active === "audio_streams"}
-            <AudioStreams />
+<!-- TABS -->
+
+{#if active === "inputs"}
+    <div class="tabs">
+        <MaterialButton style="flex: 1;" isActive={inputsTab === "microphones"} on:click={() => setSubSubTab("microphones")}>
+            <Icon size={1.2} id="microphone" white />
+            <p><T id="live.microphones" /></p>
+        </MaterialButton>
+        <MaterialButton style="flex: 1;" isActive={inputsTab === "audio_streams"} on:click={() => setSubSubTab("audio_streams")}>
+            <Icon size={1.2} id="audio_stream" white />
+            <p><T id="live.audio_streams" /></p>
+        </MaterialButton>
+    </div>
+{/if}
+
+<div class="scroll" style="flex: 1;overflow-y: auto;" class:full={active === "inputs" || active === "effects_library"} bind:this={scrollElem}>
+    <div class="grid" style={active !== "inputs" && active !== "effects_library" && (playlist ? playlist.songs.length : searchedFiles.length) ? "" : "height: 100%;"}>
+        {#if active === "inputs"}
+            {#if inputsTab === "microphones"}
+                <Microphones />
+            {:else if inputsTab === "audio_streams"}
+                <AudioStreams />
+            {/if}
         {:else if active === "metronome"}
             <Metronome />
         {:else if playlist && playlistSettings}
@@ -241,24 +361,26 @@
                     </Center>
                 {/if}
             </DropArea>
-        {:else if active === "effects_library"}
-            <div class="effects">
-                {#each fullFilteredFiles as file}
-                    <AudioEffect path={file.path} name={file.name} />
-                {/each}
-            </div>
-        {:else if fullFilteredFiles.length}
-            {#key rootPath}
-                {#key path}
-                    {#each fullFilteredFiles as file}
-                        {#if file.folder}
-                            <Folder name={file.name} path={file.path} mode="list" on:open={(e) => (path = e.detail)} />
-                        {:else}
-                            <AudioFile path={file.path} name={file.name} {active} />
-                        {/if}
+        {:else if searchedFiles.length}
+            {#if active === "effects_library"}
+                <div class="effects">
+                    {#each searchedFiles as file}
+                        <AudioEffect path={file.path} name={file.name} />
                     {/each}
+                </div>
+            {:else}
+                {#key rootPath}
+                    {#key path}
+                        {#each searchedFiles as file}
+                            {#if file.isFolder}
+                                <Folder name={file.name} path={file.path} mode="list" on:open={(e) => (path = e.detail)} />
+                            {:else}
+                                <AudioFile path={file.path} name={file.name} {active} />
+                            {/if}
+                        {/each}
+                    {/key}
                 {/key}
-            {/key}
+            {/if}
         {:else}
             <Center style="opacity: 0.2;">
                 <Icon id="noAudio" size={5} white />
@@ -267,16 +389,18 @@
     </div>
 </div>
 
-{#if active === "microphones" || active === "effects_library" || active === "metronome"}
+{#if active === "effects_library" || active === "metronome"}
     <!-- nothing -->
-{:else if active === "audio_streams"}
-    <FloatingInputs onlyOne>
-        <MaterialButton icon="add" style="flex: 1;" on:click={() => activePopup.set("audio_stream")} center title="new.audio_stream">
-            {#if !$labelsDisabled}<T id="new.audio_stream" />{/if}
-        </MaterialButton>
-    </FloatingInputs>
+{:else if active === "inputs"}
+    {#if inputsTab === "audio_streams"}
+        <FloatingInputs onlyOne>
+            <MaterialButton icon="add" style="flex: 1;" on:click={() => activePopup.set("audio_stream")} center title="new.audio_stream">
+                {#if !$labelsDisabled}<T id="new.audio_stream" />{/if}
+            </MaterialButton>
+        </FloatingInputs>
+    {/if}
 {:else if playlist}
-    <FloatingInputs side="left" on:mousedown={storeSelected}>
+    <FloatingInputs side="left">
         <MaterialButton
             disabled={$outLocked}
             title={$activePlaylist?.id === active ? "media.stop" : "media.play"}
@@ -301,7 +425,7 @@
             <Icon size={1.1} id="shuffle_play" white={$audioPlaylists[active || ""]?.mode !== "shuffle"} />
         </MaterialButton>
         <MaterialButton
-            title="media._loop"
+            title={`media._loop${$audioPlaylists[active || ""]?.loop !== false ? ": settings.enabled" : ""}`}
             on:click={() => {
                 if (!active) return
                 AudioPlaylist.update(active, "loop", $audioPlaylists[active]?.loop === undefined ? false : !$audioPlaylists[active]?.loop)
@@ -309,6 +433,32 @@
         >
             <Icon size={1.1} id="loop" white={$audioPlaylists[active || ""]?.loop === false} />
         </MaterialButton>
+
+        <!-- auto play next song in playlist -->
+        <MaterialButton
+            title={`media.auto_next${$audioPlaylists[active || ""]?.autoNext !== false ? ": settings.enabled" : ""}`}
+            on:click={() => {
+                if (!active) return
+                AudioPlaylist.update(active, "autoNext", $audioPlaylists[active]?.autoNext === undefined ? false : !$audioPlaylists[active]?.autoNext)
+            }}
+        >
+            <Icon size={1.1} id="auto" white={$audioPlaylists[active || ""]?.autoNext === false} />
+        </MaterialButton>
+
+        <div class="divider" />
+
+        <!-- total length of playlist -->
+        <p class="time">
+            {updater &&
+                joinTime(
+                    secondsToTime(
+                        playlist.songs.reduce((sum, path) => {
+                            const duration = AudioPlayer.getDurationSync(path)
+                            return sum + duration
+                        }, 0)
+                    )
+                )}
+        </p>
     </FloatingInputs>
 
     <FloatingInputs round>
@@ -341,8 +491,8 @@
     {/if}
 
     <!-- only show if audio content -->
-    {#if fullFilteredFiles.filter((a) => !a.folder)?.length}
-        <FloatingInputs onlyOne>
+    {#if filteredFiles.filter((a) => !a.isFolder)?.length}
+        <FloatingInputs onlyOne on:mousedown={storeSelected}>
             <MaterialButton title="new.playlist" on:click={createPlaylist}>
                 <Icon size={1.2} id="playlist_create" />
                 {#if !$labelsDisabled}<p><T id="new.playlist" /></p>{/if}
@@ -352,6 +502,23 @@
 {/if}
 
 <style>
+    .tabs {
+        display: flex;
+        position: relative;
+        background-color: var(--primary-darkest);
+        align-items: center;
+    }
+
+    .tabs :global(button) {
+        border-radius: 0;
+        border: none !important;
+        border-bottom: 1px solid var(--primary-lighter) !important;
+        padding: 8px;
+    }
+    .tabs :global(button.isActive) {
+        border-bottom: 1px solid var(--secondary) !important;
+    }
+
     .scroll {
         padding-bottom: 60px;
     }
@@ -403,5 +570,14 @@
     .effects :global(.selectElem button) {
         background-color: var(--primary-darkest);
         /* transition: 0.2s outline; */
+    }
+
+    .time {
+        display: flex;
+        align-items: center;
+
+        font-size: 0.9em;
+        padding: 0 10px;
+        opacity: 0.8;
     }
 </style>

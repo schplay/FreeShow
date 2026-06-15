@@ -1,6 +1,6 @@
 import { get } from "svelte/store"
 import { AudioPlayer } from "../../../audio/audioPlayer"
-import { customMetadata, metronome, metronomeTimer, playingMetronome, volume } from "../../../stores"
+import { customMetadata, metronome, metronomeTimer, playingMetronome, special, volume } from "../../../stores"
 import type { API_metronome } from "../../actions/api"
 import { clone } from "../../helpers/array"
 import { _show } from "../../helpers/shows"
@@ -61,6 +61,7 @@ export function updateMetronome(values: API_metronome, starting = false) {
     if (values.beats) metronomeValues.beats = values.beats
     if (values.volume) metronomeValues.volume = values.volume
     if (values.audioOutput !== undefined) metronomeValues.audioOutput = values.audioOutput
+    if (values.audioChannel !== undefined) metronomeValues.audioChannel = values.audioChannel
 
     metronome.set(metronomeValues)
 }
@@ -75,21 +76,31 @@ export function stopMetronome() {
     beatsPlayed = 0
 }
 
-const audioFiles = ["beat-hi", "beat-lo"]
-const audioBuffers: { [key: string]: AudioBuffer } = {}
+const clickFiles = {
+    // soft: ["beat-soft-hi.webm", "beat-soft-lo.webm"],
+    metal: ["beat-metal-hi.webm", "beat-metal-lo.webm"],
+    wood: ["beat-wood-hi.webm", "beat-wood-lo.webm"]
+}
+const audioBuffers: { [key: string]: { hi: AudioBuffer; lo: AudioBuffer } } = {}
 async function setAudioBuffers() {
-    if (audioBuffers.hi) return
+    const clickSound = get(special)?.clickSound || "metal"
+    const bufferId = clickSound === "custom" ? get(special)?.clickSound_hi + get(special)?.clickSound_lo : clickSound
+    if (!bufferId || audioBuffers[bufferId]) return
+
+    const clickSounds = clickSound === "custom" ? [get(special)?.clickSound_hi, get(special)?.clickSound_lo] : clickFiles[clickSound]
 
     await Promise.all(
-        audioFiles.map(async (fileName) => {
-            const path = `./assets/${fileName}.mp3`
-            const id = fileName.slice(fileName.indexOf("-") + 1)
+        clickSounds.map(async (fileName, index) => {
+            if (!fileName) return
+
+            const path = clickSound === "custom" ? `file://${fileName}` : `./assets/metronome/${fileName}`
 
             const audioBuffer = await fetch(path)
                 .then((res) => res.arrayBuffer())
                 .then((ArrayBuffer) => audioContext.decodeAudioData(ArrayBuffer))
 
-            audioBuffers[id] = audioBuffer
+            const id = index === 0 ? "hi" : "lo"
+            audioBuffers[bufferId] = { ...audioBuffers[bufferId], [id]: audioBuffer }
         })
     )
 }
@@ -154,13 +165,29 @@ function getTimeToNextNote() {
 
 async function playNote(time: number, first = false) {
     const source = audioContext.createBufferSource()
-    const audioBuffer = audioBuffers[first ? "hi" : "lo"]
+    const clickSound = get(special)?.clickSound || "metal"
+    const bufferId = clickSound === "custom" ? get(special)?.clickSound_hi + get(special)?.clickSound_lo : clickSound
+    const audioBuffer = audioBuffers[bufferId]?.[first ? "hi" : "lo"]
+    if (!audioBuffer) return
+
     source.buffer = audioBuffer
 
     // volume control
     const gainNode = audioContext.createGain()
-    source.connect(gainNode)
-    gainNode.connect(audioContext.destination)
+    const audioChannel = metronomeValues.audioChannel || ""
+    if (audioChannel === "mono_left" || audioChannel === "mono_right") {
+        const merger = audioContext.createChannelMerger(2)
+        source.connect(gainNode)
+
+        const channel = audioChannel === "mono_left" ? 0 : 1
+        gainNode.connect(merger, 0, channel)
+
+        merger.connect(audioContext.destination)
+    } else {
+        // Stereo (default)
+        source.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+    }
 
     // WIP connect getAnalyser()
 

@@ -9,7 +9,7 @@
 
     // $: if (!currentOutput?.out?.overlays?.length) {
     //   // get all overlays
-    //   let outs = getActiveOutputs().map((id) => $outputs[id])
+    //   let outs = getAllActiveOutputs()
     //   currentOutput = outs.find((output) => output.out?.overlays)
     // }
 
@@ -47,7 +47,7 @@
         {#each activeEffects as effect}
             <div class="overlay">
                 <Button style="flex: 1;" disabled={$outLocked} on:click={() => removeEffect(effect.id)} center red>
-                    <Icon id="effects" right />
+                    <Icon id="effects" right white />
                     <p>{effect.name || "—"}</p>
                 </Button>
             </div>

@@ -45,30 +45,7 @@ export function sortByName<T extends Record<string, any>>(arr: T[], key: keyof T
         .filter((a) => typeof a[key] === "string")
         .sort((a, b) => {
             if (!numberSort) return a[key].localeCompare(b[key])
-
-            const regex = /(\d+|\D+)/g
-
-            const segmentsA = a[key].match(regex) || []
-            const segmentsB = b[key].match(regex) || []
-
-            const len = Math.min(segmentsA.length, segmentsB.length)
-
-            for (let i = 0; i < len; i++) {
-                const partA = segmentsA[i]
-                const partB = segmentsB[i]
-
-                const numA = parseInt(partA, 10)
-                const numB = parseInt(partB, 10)
-
-                if (!isNaN(numA) && !isNaN(numB)) {
-                    if (numA !== numB) return numA - numB
-                } else {
-                    const cmp = partA.localeCompare(partB)
-                    if (cmp !== 0) return cmp
-                }
-            }
-
-            return segmentsA.length - segmentsB.length
+            return a[key].localeCompare(b[key], undefined, { numeric: true, sensitivity: "base" })
         })
 }
 
@@ -80,43 +57,56 @@ export function sortObject<T extends Record<string, any>>(object: T[], key: keyo
         if (a.default === true) textA = translateText(textA) || textA.slice(textA.indexOf("."))
         if (b.default === true) textB = translateText(textB) || textB.slice(textB.indexOf("."))
 
+        if (typeof textA !== "string") textA = ""
+        if (typeof textB !== "string") textB = ""
+
         return textA.localeCompare(textB)
     })
 }
 
 // sort objects in array numerically
 export function sortObjectNumbers<T extends Record<string, any>>(object: T[], key: keyof T, reverse = false) {
+    if (!Array.isArray(object)) return []
     return object.sort((a, b) => {
         return reverse ? b[key] - a[key] : a[key] - b[key]
     })
 }
 
-// sort any object.name by numbers in the front of the string
-export function sortByNameAndNumber<T extends Record<string, any>>(array: T[]) {
+// sort quick access numbers with optional prefixes/suffixes; blanks always go last
+export function sortByNameAndNumber<T extends Record<string, any>>(array: T[], direction: "asc" | "desc" = "asc") {
+    if (!Array.isArray(array)) return []
+
+    const dir = direction === "asc" ? 1 : -1
+
+    const parseToken = (value: string | undefined) => {
+        // keep a consistent tuple of prefix, numeric core, and suffix for reliable comparisons
+        const trimmed = value?.trim() || ""
+        if (!trimmed) return { empty: true, prefix: "", number: Number.POSITIVE_INFINITY, suffix: "" }
+
+        const match = trimmed.match(/^([A-Za-z]*)(\d+)?([A-Za-z]*)$/)
+        const prefix = (match?.[1] || "").toUpperCase()
+        const suffix = (match?.[3] || "").toUpperCase()
+        const hasDigits = !!match?.[2]
+        const number = hasDigits ? parseInt(match![2]!, 10) : Number.POSITIVE_INFINITY
+
+        return { empty: false, prefix, number, suffix, hasDigits }
+    }
+
     return array.sort((a, b) => {
-        const aNumberStr = a.quickAccess?.number?.toString() || ""
-        const bNumberStr = b.quickAccess?.number?.toString() || ""
+        const aToken = parseToken(a.quickAccess?.number?.toString())
+        const bToken = parseToken(b.quickAccess?.number?.toString())
 
-        // Split into prefix letters + numeric part
-        const extractParts = (str: string) => {
-            const match = str.match(/^([A-Za-z]*)(\d+)?$/)
-            return { prefix: match?.[1] || "", number: match?.[2] ? parseInt(match[2], 10) : Infinity }
-        }
+        if (aToken.empty !== bToken.empty) return aToken.empty ? 1 : -1
 
-        const aParts = extractParts(aNumberStr)
-        const bParts = extractParts(bNumberStr)
+        if (aToken.prefix !== bToken.prefix) return aToken.prefix.localeCompare(bToken.prefix) * dir
 
-        // Compare by prefix first
-        if (aParts.prefix !== bParts.prefix) return aParts.prefix.localeCompare(bParts.prefix)
+        if (aToken.number !== bToken.number) return (aToken.number - bToken.number) * dir
 
-        // Then by numeric part
-        if (aParts.number !== bParts.number) return aParts.number - bParts.number
+        if (aToken.suffix !== bToken.suffix) return aToken.suffix.localeCompare(bToken.suffix) * dir
 
-        // Fall back to name
-        return (a.name || "").localeCompare(b.name || "")
+        return (a.name || "").localeCompare(b.name || "") * dir
     })
 }
-
 
 // sort object by name and numbers any location (file names)
 export function sortFilenames<T extends Record<string, any>>(filenames: T[]) {
@@ -189,8 +179,13 @@ export function changeValues<T>(object: T, values: { [key: string]: any }) {
 
 // clone objects
 export function clone<T>(object: T): T {
-    if (typeof object !== "object") return object
-    return JSON.parse(JSON.stringify(object))
+    if (object === null || typeof object !== "object") return object
+
+    try {
+        return structuredClone(object)
+    } catch {
+        return object
+    }
 }
 
 // not currently in use, but could be handy
@@ -212,7 +207,7 @@ export function clone<T>(object: T): T {
 export function shuffleArray(array) {
     for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1))
-            ;[array[i], array[j]] = [array[j], array[i]]
+        ;[array[i], array[j]] = [array[j], array[i]]
     }
 
     return array
@@ -236,8 +231,7 @@ export function getChangedKeys(current: any[], previous: any[]) {
     return changedKeys
 }
 
-
-export function rangeSelect(e: any, currentlySelected: (number | string)[], newSelection: (number | string)): (number | string)[] {
+export function rangeSelect(e: any, currentlySelected: (number | string)[], newSelection: number | string): (number | string)[] {
     if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return [newSelection]
 
     if (e.ctrlKey || e.metaKey) {

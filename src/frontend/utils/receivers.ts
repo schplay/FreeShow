@@ -3,6 +3,7 @@ import { CLOUD, CONTROLLER, NDI, OUTPUT, OUTPUT_STREAM, REMOTE, STAGE } from "..
 import type { ClientMessage } from "../../types/Socket"
 import { AudioAnalyser } from "../audio/audioAnalyser"
 import { AudioAnalyserMerger } from "../audio/audioAnalyserMerger"
+import { setEqualizerEnabled, updateEqualizerBands } from "../audio/effects/audioEqualizer"
 import { runAction } from "../components/actions/actions"
 import { clone } from "../components/helpers/array"
 import { checkNextAfterMedia } from "../components/helpers/showActions"
@@ -18,6 +19,8 @@ import {
     allOutputs,
     audioChannelsData,
     audioData,
+    audioEffects,
+    categories,
     closeAd,
     colorbars,
     customMessageCredits,
@@ -28,9 +31,10 @@ import {
     driveData,
     dynamicValueData,
     effects,
-    equalizerConfig,
     events,
     gain,
+    globalRegexes,
+    groups,
     livePrepare,
     media,
     metronome,
@@ -49,6 +53,7 @@ import {
     projects,
     shows,
     showsCache,
+    slideTimelineSpeedMultiplier,
     slideVideoData,
     special,
     stageShows,
@@ -72,9 +77,12 @@ import { closeApp, save } from "./save"
 import { client } from "./sendData"
 import { playFolder, previewShortcuts } from "./shortcuts"
 import { restartOutputs } from "./updateSettings"
-import { setEqualizerEnabled, updateEqualizerBands } from "../audio/audioEqualizer"
 
+let mainReceiversInitialized = false
 export function setupMainReceivers() {
+    if (mainReceiversInitialized) return
+    mainReceiversInitialized = true
+
     receiveMainGlobal()
 
     receive(OUTPUT, receiveOUTPUTasMAIN)
@@ -82,7 +90,11 @@ export function setupMainReceivers() {
     receive(CLOUD, receiveCLOUD)
 }
 
+let remoteReceiversInitialized = false
 export function remoteListen() {
+    if (remoteReceiversInitialized) return
+    remoteReceiversInitialized = true
+
     // FROM CLIENT (EXPRESS SERVERS)
     window.api.receive(REMOTE, (msg: ClientMessage) => client(REMOTE, msg))
     window.api.receive(STAGE, (msg: ClientMessage) => client(STAGE, msg))
@@ -108,18 +120,17 @@ const receiveOUTPUTasMAIN: any = {
     RESTART: ({ id }) => restartOutputs(id),
     // DISPLAY: (a: any) => outputDisplay.set(a.enabled),
     OUTPUT_STATE: (newStates: { id: string; active: boolean | "invisible" }[]) => {
-
-        outputState.update(a => {
-            newStates.forEach(newState => {
-                const stateIndex = a.findIndex(state => state.id === newState.id)
+        outputState.update((a) => {
+            newStates.forEach((newState) => {
+                const stateIndex = a.findIndex((state) => state.id === newState.id)
                 if (stateIndex < 0) a.push(newState)
                 else a[stateIndex] = newState
             })
 
             // only enabled ones & not invisible
-            a = a.filter(state => get(outputs)[state.id]?.enabled && !get(outputs)[state.id]?.invisible)
+            a = a.filter((state) => get(outputs)[state.id]?.enabled && !get(outputs)[state.id]?.invisible)
 
-            const getVisibleState = [...new Set((a.filter(state => typeof state.active === "boolean").map((state) => state.active) as boolean[]))]
+            const getVisibleState = [...new Set(a.filter((state) => typeof state.active === "boolean").map((state) => state.active) as boolean[])]
             if (getVisibleState.length === 1) outputDisplay.set(getVisibleState[0])
 
             return a
@@ -174,7 +185,7 @@ const receiveOUTPUTasMAIN: any = {
     MAIN_LOG: (msg: any) => console.info(msg),
     MAIN_DATA: (msg: any) => videosData.update((a) => ({ ...a, ...msg })),
     MAIN_TIME: (msg: any) => videosTime.update((a) => ({ ...a, ...msg })),
-    MAIN_VIDEO_ENDED: (msg) => {
+    MAIN_VIDEO_ENDED: async (msg) => {
         if (!msg || clearing.includes(msg.id)) return
         clearing.push(msg.id)
         setTimeout(() => clearing.splice(clearing.indexOf(msg.id), 1), msg.duration || 1000)
@@ -190,7 +201,7 @@ const receiveOUTPUTasMAIN: any = {
         }
 
         // check and execute next after media regardless of loop
-        if (checkNextAfterMedia(videoPath, "media", msg.id) || msg.loop) return
+        if ((await checkNextAfterMedia(videoPath, "media", msg.id)) || msg.loop) return
 
         if (get(special).clearMediaOnFinish === false) return
 
@@ -220,7 +231,7 @@ const receiveOUTPUTasMAIN: any = {
     },
     MAIN_SHOWS_DATA: () => send(OUTPUT, ["SHOWS_DATA"], get(shows)),
     MAIN_SLIDE_VIDEO: (data: { id: string; path: string; data: any }) => {
-        slideVideoData.update(a => {
+        slideVideoData.update((a) => {
             if (!a[data.id]) a = { [data.id]: {} }
             a[data.id][data.path] = data.data
             return a
@@ -275,14 +286,15 @@ export const receiveOUTPUTasOUTPUT: any = {
     // SLIDE: (a: any) => outSlide.set(a),
     // OVERLAYS: (a: any) => outOverlays.set(a),
     // OVERLAY: (a: any) => overlays.set(a),
-    // META: (a: any) => displayMetadata.set(a),
     // COLOR: (a: any) => backgroundColor.set(a),
     // SCREEN: (a: any) => screen.set(a),
     SHOWS: (a: any) => showsCache.set(a),
+    CATEGORIES: (a: any) => categories.set(a),
 
     TEMPLATES: (a: any) => templates.set(a),
     OVERLAYS: (a: any) => clone(overlays.set(a)),
     EVENTS: (a: any) => events.set(a),
+    GROUPS: (a: any) => groups.set(a),
 
     DRAW: (a: any) => draw.set(a.data),
     DRAW_TOOL: (a: any) => drawTool.set(a.data),
@@ -296,11 +308,13 @@ export const receiveOUTPUTasOUTPUT: any = {
     TIMERS: (a: any) => clone(timers.set(a)),
     VARIABLES: (a: any) => clone(variables.set(a)),
     TIME_FORMAT: (a: any) => timeFormat.set(a),
+    GLOBAL_REGEXES: (a: any) => globalRegexes.set(a),
     SPECIAL: (a: any) => clone(special.set(a)),
+    SLIDE_TIMELINE_SPEED_MULTIPLIER: (a: any) => slideTimelineSpeedMultiplier.set(a),
     ACTIVE_TIMERS: (a: any) => activeTimers.set(a),
     // POSITION: (a: any) => outputPosition.set(a),
     PLAYER_VIDEOS: (a: any) => playerVideos.set(a),
-    STAGE_SHOWS: (a: any) => stageShows.set(a),
+    STAGE: (a: any) => stageShows.set(a),
 
     // for dynamic values
     PROJECTS: (a: any) => projects.set(a),
@@ -317,10 +331,13 @@ export const receiveOUTPUTasOUTPUT: any = {
     GAIN: (a: any) => gain.set(a),
     AUDIO_CHANNELS_DATA: (a: any) => audioChannelsData.set(a),
 
-    EQUALIZER_CONFIG: (a: any) => {
-        equalizerConfig.set(a)
-        setEqualizerEnabled(a.enabled)
-        updateEqualizerBands(a.bands)
+    AUDIO_EFFECTS: (a: any) => {
+        audioEffects.set(a)
+
+        if (a.main?.equalizer) {
+            setEqualizerEnabled(a.main.equalizer.enabled)
+            updateEqualizerBands(a.main.equalizer.bands)
+        }
     },
 
     METRONOME: (a: any) => metronome.set(a),

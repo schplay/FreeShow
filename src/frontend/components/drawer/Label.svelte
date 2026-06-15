@@ -20,11 +20,11 @@
     const nameCategories = {
         overlay: (c: { name: string; id: string }) => {
             if (getAccess("overlays").global === "read" || getAccess("overlays")[c.id] === "read") return
-            overlays.update((a) => setName(a, c))
+            overlays.update((a) => setName(a, c, true))
         },
         template: (c: { name: string; id: string }) => {
             if (getAccess("templates").global === "read" || getAccess("templates")[c.id] === "read") return
-            templates.update((a) => setName(a, c))
+            templates.update((a) => setName(a, c, true))
         },
         effect: (c: { name: string; id: string }) => {
             if (getAccess("overlays").global === "read" || getAccess("overlays")[c.id] === "read") return
@@ -32,10 +32,12 @@
         },
         player: (c: { name: string; id: string }) => playerVideos.update((a) => setName(a, c))
     }
-    const setName = (a: any, { name, id }: any, nameKey = "name") => {
+    const setName = (a: any, { name, id }: any, modify: boolean = false) => {
         if (!a[id]) return a
 
-        a[id][nameKey] = name
+        a[id].name = name
+
+        if (modify) a[id].modified = Date.now()
         return a
     }
 
@@ -51,14 +53,7 @@
     let editActive = false
 </script>
 
-<div
-    class="label"
-    class:alignRight={icon}
-    class:padding={!renameId}
-    data-title={title}
-    class:list={mode !== "grid"}
-    style={$fullColors ? `background-color: ${color};color: ${getContrast(color || "")};` : mode !== "list" ? `border-bottom: 2px solid ${color};` : ""}
->
+<div class="label" class:alignRight={icon} class:padding={!renameId} data-title={title} class:list={mode !== "grid"} style={$fullColors ? `background-color: ${color};color: ${getContrast(color || "")};` : mode !== "list" ? `border-bottom: 2px solid ${color};` : ""}>
     {#if icon}
         <Icon id={icon} class="icon" style={icon === "protected" ? "opacity: 0.6;" : ""} size={icon === "protected" ? 0.6 : 1} {white} />
     {/if}

@@ -3,6 +3,7 @@
     import autosize, { AutosizeTypes } from "../../../common/util/autosize"
     import { createVirtualBreaks } from "../../../common/util/show"
     import { getStyles } from "../../../common/util/style"
+    import { mediaCache } from "../../util/stores"
 
     export let item: Item
 
@@ -87,6 +88,10 @@
                 {/each}
             </div>
         </div>
+    {:else if item.type === "media" && item.src}
+        <img src={$mediaCache[item.src] || item.src} style="width:100%;height:100%;object-fit:{item.fit || 'contain'};" alt="" />
+    {:else if item.type === "icon" && item.customSvg}
+        <div class="customSvg">{@html item.customSvg}</div>
     {/if}
 </div>
 
@@ -112,11 +117,19 @@
     .break {
         width: 100%;
 
+        font-size: 0; /* auto size fix */
         /* height: 100%; */
 
         overflow-wrap: break-word;
         /* line-break: after-white-space;
     -webkit-line-break: after-white-space; */
+
+        /* balanced breaking, looks much cleaner */
+        text-wrap: balance;
+    }
+
+    .break span {
+        font-size: 100px;
     }
 
     /* span {
@@ -125,7 +138,12 @@
     color: white;
   } */
 
-    .break :global(span) {
-        font-size: 100px;
+    .customSvg {
+        width: 100%;
+        height: 100%;
+    }
+    .customSvg :global(svg) {
+        width: 100%;
+        height: 100%;
     }
 </style>

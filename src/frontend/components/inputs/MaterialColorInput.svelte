@@ -27,6 +27,8 @@
     function getHexValue(value: string) {
         if (typeof value !== "string") return "#000000"
 
+        opacity = 100
+
         if (value.includes("gradient")) {
             if (!pickerOpen) opacity = getGradientOpacity(value) * 100
             return value
@@ -60,7 +62,8 @@
         pickerOpen = false
     }
 
-    function colorUpdate(color: string) {
+    function colorUpdate(color: string, clicked: boolean = false) {
+        if (typeof color !== "string") return "#000000"
         if (editMode) return color
 
         hexValue = color
@@ -75,11 +78,13 @@
             }
         }
 
+        if (clicked && actualValue === value) opacity = 100 // reset when clicking the active color
+
         return actualValue
     }
 
-    function selectColor(c: string, close = true) {
-        let actualValue = colorUpdate(c)
+    function selectColor(c: string, close = true, clicked = false) {
+        let actualValue = colorUpdate(c, clicked)
 
         dispatch("change", actualValue)
         dispatch("input", actualValue)
@@ -168,6 +173,12 @@
     let opacity = 100
     let updated: NodeJS.Timeout | null = null
     let gotUpdate = false
+    // don't update if value just changed
+    $: if (value) remount()
+    function remount() {
+        mounted = false
+        setTimeout(() => (mounted = true))
+    }
     $: if (opacity) opacityChanged()
     function opacityChanged() {
         if (!allowOpacity || !mounted) return
@@ -194,7 +205,7 @@
     {#if !alwaysVisible}
         <div class="background" on:click={togglePicker} />
 
-        <div class="color-display" data-title={noLabel ? translateText(label) : ""} style="background:{value || 'transparent'};{noLabel ? 'margin-left: var(--margin);' : ''}" on:click={togglePicker}></div>
+        <div class="color-display" data-title="{noLabel ? translateText(label) + (value ? ': ' : '') : ''}<i>{value}</i>" style="background:{value || 'transparent'};{noLabel ? 'margin-left: var(--margin);' : ''}" on:click={togglePicker}></div>
 
         {#if !noLabel || value === ""}
             <label>{@html translateText(label)}</label>
@@ -216,16 +227,7 @@
                         {#if color === "BREAK"}
                             <div style="display: block;margin: 10px;width: 100%;"></div>
                         {:else}
-                            <div
-                                class="pickColor"
-                                class:active={!editMode && hexValue === color.value}
-                                class:disabled={disabledGradientColors.includes(color.value)}
-                                data-title={color.name}
-                                style="background: {color.value};"
-                                tabindex="0"
-                                aria-label="Select gradient {color.name || color.value}"
-                                on:click={() => selectColor(color.value)}
-                            >
+                            <div class="pickColor" class:active={!editMode && hexValue === color.value} class:disabled={disabledGradientColors.includes(color.value)} data-title={color.name} style="background: {color.value};" tabindex="0" aria-label="Select gradient {color.name || color.value}" on:click={() => selectColor(color.value, true, true)}>
                                 {#if editMode}
                                     <div class="hover" class:visible={disabledGradientColors.includes(color.value)}>
                                         <Icon id={isCustom ? "delete" : "disable"} white style="fill: {getContrast(color.value)};" />
@@ -237,7 +239,7 @@
 
                     {#if allowOpacity}
                         <div class="opacity">
-                            <MaterialNumberInput label="edit.opacity" value={Math.round(opacity)} min={1} max={100} on:change={(e) => (opacity = Math.round(e.detail))} showSlider />
+                            <MaterialNumberInput label="edit.opacity" value={Math.round(opacity)} max={100} on:change={(e) => (opacity = Math.round(e.detail))} showSlider />
                         </div>
                     {/if}
 
@@ -279,16 +281,7 @@
                         {#if color === "BREAK"}
                             <div style="display: block;margin: 10px;width: 100%;"></div>
                         {:else}
-                            <div
-                                data-value={color.value}
-                                class="pickColor"
-                                class:active={!editMode && hexValue.toLowerCase() === color.value.toLowerCase()}
-                                class:disabled={disabledColors.includes(color.value)}
-                                data-title={color.name}
-                                tabindex="0"
-                                style="background:{color.value};--outline-color: {getContrast(color.value)};"
-                                on:click={() => selectColor(color.value)}
-                            >
+                            <div data-value={color.value} class="pickColor" class:active={!editMode && hexValue.toLowerCase() === color.value?.toLowerCase()} class:disabled={disabledColors.includes(color.value)} data-title={color.name} tabindex="0" style="background:{color.value};--outline-color: {getContrast(color.value)};" on:click={() => selectColor(color.value, true, true)}>
                                 {#if editMode}
                                     <div class="hover" class:visible={disabledColors.includes(color.value)}>
                                         <Icon id={isCustom ? "delete" : "disable"} white style="fill: {getContrast(color.value)};" />
@@ -300,7 +293,7 @@
 
                     {#if allowOpacity}
                         <div class="opacity">
-                            <MaterialNumberInput label="edit.opacity" value={Math.round(opacity)} min={1} max={100} on:change={(e) => (opacity = Math.round(e.detail))} showSlider />
+                            <MaterialNumberInput label="edit.opacity" value={Math.round(opacity)} max={100} on:change={(e) => (opacity = Math.round(e.detail))} showSlider />
                         </div>
                     {/if}
 

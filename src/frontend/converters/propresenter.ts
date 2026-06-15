@@ -1,6 +1,7 @@
+import { _updaters } from "./../components/helpers/historyHelpers"
 import { get } from "svelte/store"
 import { uid } from "uid"
-import type { Item, Layout, Line, Slide, SlideData } from "../../types/Show"
+import type { Item, Layout, Line, Slide, SlideData, Timeline } from "../../types/Show"
 import { DEFAULT_ITEM_STYLE } from "../components/edit/scripts/itemHelpers"
 import { getExtension, getFileName, getMediaType } from "../components/helpers/media"
 import { checkName, getGlobalGroup, initializeMetadata, newSlide } from "../components/helpers/show"
@@ -101,11 +102,13 @@ export function convertProPresenter(data: any) {
             })
 
             layouts.forEach((layout: any, i: number) => {
-                show.layouts[i === 0 ? layoutID : layout.id] = {
+                let layoutId = i === 0 ? layoutID : layout.id
+                show.layouts[layoutId] = {
                     name: layout.name || translateText("example.default"),
                     notes: i === 0 ? song["@notes"] || "" : "",
                     slides: layout.slides
                 }
+                if (layout.timeline) show.layouts[layoutId].timeline = layout.timeline
             })
 
             tempShows.push({ id: showId, show })
@@ -163,7 +166,7 @@ function convertJSONToSlides(song: any) {
     let slidesList: string[] = []
     const slidesRef: any = {}
 
-    song.verses.forEach(([text, label]) => {
+    song.verses?.forEach(([text, label]) => {
         if (!text) return
 
         const id: string = uid()
@@ -199,10 +202,10 @@ function convertJSONToSlides(song: any) {
 
 function convertToSlides(song: any, extension: string) {
     let slideGroups: any = []
-    if (extension === "pro4") slideGroups = song.slides.RVDisplaySlide || []
-    if (extension === "pro5") slideGroups = song.groups.RVSlideGrouping || []
-    if (extension === "pro6") slideGroups = song.array[0].RVSlideGrouping || []
-    if (!Array.isArray(slideGroups)) slideGroups = [slideGroups]
+    if (extension === "pro4") slideGroups = song.slides?.RVDisplaySlide || []
+    if (extension === "pro5") slideGroups = song.groups?.RVSlideGrouping || []
+    if (extension === "pro6") slideGroups = song.array?.[0]?.RVSlideGrouping || []
+    if (!Array.isArray(slideGroups)) slideGroups = slideGroups ? [slideGroups] : []
     const arrangements = song.arrangements || song.array?.[1]?.RVSongArrangement || []
 
     // console.log(song)
@@ -292,7 +295,7 @@ function getSlideItems(slide: any) {
 
     let elements: any = null
     if (slide.displayElements) elements = slide.displayElements
-    else elements = slide.array.find((a) => a["@rvXMLIvarName"] === "displayElements")
+    else elements = Array.isArray(slide.array) ? slide.array.find((a: any) => a["@rvXMLIvarName"] === "displayElements") : null
     if (!elements) return []
 
     if (!elements.RVTextElement) {
@@ -306,6 +309,8 @@ function getSlideItems(slide: any) {
     if (!itemStrings && Array.isArray(textElement)) itemStrings = textElement.map((a) => a.NSString)
     if (!itemStrings) itemStrings = [elements.RVTextElement["@RTFData"]]
     else if (itemStrings["#text"]) itemStrings = [itemStrings]
+
+    itemStrings = itemStrings.filter(Boolean)
 
     const rtf = itemStrings.find((a) => a["@rvXMLIvarName"] === "RTFData")
     const plain = itemStrings.find((a) => a["@rvXMLIvarName"] === "PlainText")
@@ -364,6 +369,7 @@ function arrangeLayouts(arrangements, sequences) {
 /// //
 
 function splitTextToLines(text: string) {
+    if (typeof text !== "string") return []
     let lines: Line[] = []
     const data = text.replaceAll("\n\n", "<br>").split("<br>")
     lines = data.map((lineText: string) => ({ align: "", text: [{ style: "", value: lineText.trim() }] }))
@@ -371,45 +377,18 @@ function splitTextToLines(text: string) {
     return lines
 }
 
-const latin1 = {
-    "92": "'",
-    "93": "‘", // “
-    "94": "’", // ”
-    "96": "–",
-    e6: "æ",
-    f8: "ø",
-    e5: "å",
-    c6: "Æ",
-    d8: "Ø",
-    c5: "Å",
-    f6: "ö",
-    e4: "ä",
-    d6: "Ö",
-    c4: "Ä",
-    "89": "ä", // ‰
-    "88": "ö", // ∘
-    c2: "å", // Â
-    a5: "ra", // ¥
-    e1: "á",
-    "9a": "š",
-    fd: "ý",
-    e9: "é",
-    fa: "ú",
-    ed: "í",
-    f3: "ó",
-    f4: "ô",
-    "9e": "ž",
-    c1: "Á",
-    c9: "É",
-    cd: "Í",
-    d3: "Ó",
-    da: "Ú",
-    fc: "ü",
-    dc: "Ü",
-    f1: "ñ",
-    d1: "Ñ",
-    a1: "¡",
-    bf: "¿"
+// replace all RTF hex codes (e.g., \'e5) with their latin1 character (e.g., å)
+function decodeLatin1HexRTF(input: string): string {
+    return input.replace(/\\'([0-9a-fA-F]{2})/g, (_, hex) => {
+        const byte = parseInt(hex, 16)
+
+        if (typeof TextDecoder !== "undefined") {
+            return new TextDecoder("latin1").decode(Uint8Array.from([byte]))
+        }
+
+        // fallback
+        return String.fromCharCode(byte)
+    })
 }
 
 function decodeBase64(text: string) {
@@ -435,10 +414,8 @@ function decodeBase64(text: string) {
     // convert ‘ & ’ to '
     r = r.replaceAll("‘", "'").replaceAll("’", "'")
 
-    // decode Latin-1
-    for (const [key, value] of Object.entries(latin1)) {
-        r = r.replaceAll(`\\'${key}`, value)
-    }
+    // decode Latin-1 hex codes
+    r = decodeLatin1HexRTF(r)
 
     // decode encoded unicode dec letters
     // https://unicodelookup.com/
@@ -561,9 +538,10 @@ function decodeHex(input: string) {
 }
 
 function rgbStringToHex(rgbaString: string) {
-    const [r, g, b, a]: any = rgbaString.split(" ")
+    if (typeof rgbaString !== "string") return ""
+    const [r, g, b, _updatersa]: any = rgbaString.split(" ")
     // TODO: alpha
-    if (isNaN(r) || isNaN(g) || isNaN(b)) console.warn(r, g, b, a)
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return ""
 
     return `#${toHex(r * 255)}${toHex(g * 255)}${toHex(b * 255)}`
 }
@@ -583,6 +561,8 @@ function convertProToSlides(song: any) {
     const tempGroups: any[] = getGroups(song.cueGroups || [])
     const tempSlides: any[] = getSlides(song.cues || [])
     // console.log(tempArrangements, tempGroups, tempSlides)
+
+    let idMap = new Map<string, string>()
 
     if (!tempArrangements.length) {
         tempArrangements.push({ groups: Object.keys(tempGroups), name: "" })
@@ -620,6 +600,7 @@ function convertProToSlides(song: any) {
 
         const slideId = uid()
         const layoutSlide: SlideData = { id: slideId }
+        idMap.set(id, slideId)
 
         const tempSlide = tempSlides[id]
 
@@ -656,6 +637,43 @@ function convertProToSlides(song: any) {
         return layoutSlide
     }
 
+    // TIMELINE
+    const timelineCues = song.timeline?.cues || []
+    if (timelineCues.length) {
+        let slideIndexMap: string[] = []
+        layouts[0].slides.forEach((slide) => {
+            slideIndexMap.push(slide.id)
+            if (slides[slide.id].children) slideIndexMap.push(...(slides[slide.id].children || []))
+        })
+        let currentIndex = -1
+
+        const timeline: Timeline = {
+            actions: timelineCues
+                .map((cue) => {
+                    const id = idMap.get(cue.cueId?.string) || cue.cueId?.string
+                    if (!id) return null
+
+                    let slideIndex = slideIndexMap.findIndex((slideId, i) => slideId === id && i >= currentIndex)
+                    if (slideIndex === -1) slideIndex = slideIndexMap.findIndex((slideId) => slideId === id)
+                    currentIndex = slideIndex
+
+                    return {
+                        id: uid(6),
+                        time: (cue.triggerTime || 0) * 1000,
+                        name: cue.name || "",
+                        type: "slide",
+                        data: {
+                            id,
+                            index: slideIndex > -1 ? slideIndex : undefined
+                        }
+                    }
+                })
+                .filter(Boolean)
+        }
+
+        layouts[0].timeline = timeline
+    }
+
     return { slides, layouts, media }
 }
 
@@ -683,28 +701,28 @@ function convertItem(item: any) {
 }
 
 function getArrangements(arrangements: any) {
-    if (!arrangements) return []
+    if (!Array.isArray(arrangements)) return []
 
     const newArrangements: any = []
     arrangements.forEach((arr) => {
         newArrangements.push({
             name: arr.name,
-            groups: arr.groupIdentifiers?.map((a) => a.string) || []
+            groups: arr.groupIdentifiers?.map((a: any) => a.string) || []
         })
     })
 
-    return newArrangements.filter((a) => a.groups.length)
+    return newArrangements.filter((a: any) => a.groups.length)
 }
 
-function getGroups(cueGroups) {
-    if (!cueGroups) return {}
+function getGroups(cueGroups: any) {
+    if (!Array.isArray(cueGroups)) return {}
 
     const newGroups: any = {}
-    cueGroups.forEach(({ group, cueIdentifiers }) => {
+    cueGroups.forEach(({ group, cueIdentifiers }: any) => {
         newGroups[group.uuid.string] = {
             name: group.name,
             color: getColorValue(group.color),
-            slides: cueIdentifiers?.map((a) => a.string) || []
+            slides: cueIdentifiers?.map((a: any) => a.string) || []
         }
     })
 
@@ -713,15 +731,16 @@ function getGroups(cueGroups) {
 
 function getSlides(cues: any) {
     const slides: any = {}
+    if (!Array.isArray(cues)) return slides
 
-    cues.forEach((slide) => {
-        const baseSlide = slide.actions.find((a) => a.slide?.presentation)?.slide?.presentation?.baseSlide || {}
+    cues.forEach((slide: any) => {
+        const baseSlide = slide.actions?.find((a: any) => a.slide?.presentation)?.slide?.presentation?.baseSlide || {}
         if (!baseSlide) return
 
         slides[slide.uuid.string] = {
             name: slide.name,
             disabled: !slide.isEnabled,
-            media: slide.actions.find((a) => a.media?.element)?.media?.element?.url?.absoluteString,
+            media: slide.actions?.find((a: any) => a.media?.element)?.media?.element?.url?.absoluteString,
             backgroundColor: getColorValue(baseSlide.backgroundColor),
             size: baseSlide.size,
             items: baseSlide.elements?.map(getItem) || []

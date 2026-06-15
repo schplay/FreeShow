@@ -1,4 +1,4 @@
-export type ContentProviderId = "planningcenter" | "churchApps" | "amazinglife"
+export type ContentProviderId = "planningcenter" | "churchApps" | "amazinglife" | "canva"
 
 /**
  * Common types and interfaces for content providers
@@ -97,6 +97,15 @@ export interface ContentLibraryCategory {
 }
 
 /**
+ * Result of a provider license check. `null` from checkMediaLicense means
+ * the item is not licensed or the check failed.
+ */
+export interface MediaLicense {
+    pingbackUrl: string
+    expiresAt: number // unix ms; license is valid while Date.now() < expiresAt
+}
+
+/**
  * Content file (image or video) with metadata
  */
 export interface ContentFile {
@@ -106,4 +115,7 @@ export interface ContentFile {
     type: "image" | "video"
     name?: string
     decryptionKey?: string
+    mediaId?: string // Provider-specific media ID for tracking
+    pingbackUrl?: string // URL to ping after 30+ seconds of playback
+    providerId?: ContentProviderId // ID of the content provider this file came from
 }

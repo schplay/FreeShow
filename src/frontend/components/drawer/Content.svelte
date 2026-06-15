@@ -1,17 +1,16 @@
 <script lang="ts">
     import { drawerTabsData } from "../../stores"
-    import Icon from "../helpers/Icon.svelte"
     import T from "../helpers/T.svelte"
-    import Button from "../inputs/Button.svelte"
+    import MaterialButton from "../inputs/MaterialButton.svelte"
     import Audio from "./audio/Audio.svelte"
     import Scripture from "./bible/Scripture.svelte"
     import Calendar from "./calendar/Calendar.svelte"
     import Media from "./media/Media.svelte"
     import Actions from "./pages/Actions.svelte"
+    import OBS from "./pages/OBS.svelte"
     import Overlays from "./pages/Overlays.svelte"
     import Shows from "./pages/Shows.svelte"
     import Templates from "./pages/Templates.svelte"
-    import Triggers from "./pages/Triggers.svelte"
     import Variables from "./pages/Variables.svelte"
     import Timers from "./timers/Timers.svelte"
 
@@ -44,10 +43,9 @@
     {#if searchValue && active !== "all" && searchTab !== id + active && id !== "scripture"}
         <div class="warning">
             <p style="padding: 6px 8px;"><T id="main.search_active" />: <span style="color: var(--secondary);font-weight: bold;">{searchValue}</span></p>
-            <Button on:click={() => (searchValue = "")} dark>
-                <Icon id="close" right />
+            <MaterialButton icon="close" style="padding: 6px 16px;" on:click={() => (searchValue = "")}>
                 <p><T id="clear.search" /></p>
-            </Button>
+            </MaterialButton>
         </div>
     {/if}
 
@@ -72,8 +70,8 @@
             <Timers {searchValue} />
         {:else if active === "variables"}
             <Variables {searchValue} />
-        {:else if active === "triggers"}
-            <Triggers {searchValue} />
+        {:else if active === "obs"}
+            <OBS {searchValue} />
         {/if}
     {/if}
 </div>

@@ -32,6 +32,12 @@ export class OutputBounds {
             if (!window || window.isDestroyed()) return
             window.setBounds(data.bounds)
         }, 10)
+
+        // ensure bounds are set properly
+        setTimeout(() => {
+            if (!window || window.isDestroyed()) return
+            window.setBounds(data.bounds)
+        }, 80)
     }
 
     static moveToFront(id: string) {
@@ -45,6 +51,7 @@ export class OutputBounds {
         OutputHelper.getKeys().forEach((outputId) => {
             const output = OutputHelper.getOutput(outputId)
             if (output.boundsLocked) return
+            if (!output.window || output.window.isDestroyed()) return
 
             const wBounds = output.window.getBounds()
             const centerLeft = wBounds.x + wBounds.width / 2

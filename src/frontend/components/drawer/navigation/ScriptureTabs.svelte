@@ -20,11 +20,7 @@
     $: favoritesList = scripturesList.filter((a) => a.favorite)
 
     let sections: any[] = []
-    $: sections = [
-        ...(favoritesList.length ? [[{ id: "TITLE", label: "category.favourites" }, ...convertToButton(favoritesList)]] : []),
-        [{ id: "TITLE", label: "scripture.collections" }, ...convertToButton(collections)],
-        [{ id: "TITLE", label: "scripture.bibles_section" }, ...convertToButton(localBibles), ...(localBibles.length && apiBibles.length ? [{ id: "SEPARATOR", label: "API" }] : []), ...convertToButton(apiBibles)]
-    ]
+    $: sections = [...(favoritesList.length ? [[{ id: "TITLE", label: "category.favourites" }, ...convertToButton(favoritesList)]] : []), [{ id: "TITLE", label: "scripture.collections" }, ...convertToButton(collections)], [{ id: "TITLE", label: "scripture.bibles_section" }, ...convertToButton(localBibles), ...(localBibles.length && apiBibles.length ? [{ id: "SEPARATOR", label: "API" }] : []), ...convertToButton(apiBibles)]]
 
     function convertToButton(categories: any[]) {
         return categories
@@ -33,7 +29,7 @@
             .map((a: any) => {
                 const icon = a.api ? "scripture_alt" : a.collection ? "collection" : "scripture"
                 const count = a.collection?.versions?.length || 0
-                return { id: a.id, label: a.customName || a.name, icon, count, onDoubleClick: () => startScripture() }
+                return { id: a.id, label: a.customName || a.name, icon, count, onDoubleClick: () => startScripture(), boxedIcon: true }
             })
     }
 

@@ -20,7 +20,7 @@
     // WIP use savedScreen = $projects[$activeProject || ""].shows.find((a) => a.id === path)?.data?.screenName to determine if it is active or not
 
     onMount(() => {
-        requestMain(Main.SLIDESHOW_GET_APPS, undefined, (a) => presentationApps.set(a))
+        requestMain(Main.SLIDESHOW_GET_APPS, undefined, (a) => presentationApps.set(a || []))
     })
 
     let opening = false
@@ -100,7 +100,7 @@
                 <Icon id="refresh" />
             </Button>
             <p style="white-space: normal;overflow: auto;padding: 3px 8px;">
-                <b>{$presentationData.info?.titles[$presentationData.stat?.position - 1] || ""}</b>
+                <b>{$presentationData.info?.titles?.[$presentationData.stat?.position - 1] || ""}</b>
                 <span style="padding-inline-start: 10px;">{$presentationData.info?.notes[$presentationData.stat?.position - 1] || ""}</span>
             </p>
         </div>

@@ -1,5 +1,5 @@
 import express from "express"
-import type { ContentFile, ContentLibraryCategory, ContentProviderId } from "./types"
+import type { ContentFile, ContentLibraryCategory, ContentProviderId, MediaLicense } from "./types"
 
 /**
  * Base types for content provider authentication and requests
@@ -47,10 +47,12 @@ export abstract class ContentProvider<TScope extends string = string, TAuthData 
         this.setupAuthRoutes()
     }
 
+    abstract isConnected(scope: TScope): boolean
+
     /**
      * Establishes connection to the content provider
      */
-    abstract connect(scope: TScope): Promise<TAuthData | null>
+    abstract connect(scope: TScope, data?: any): Promise<TAuthData | null>
 
     /**
      * Disconnects from the content provider
@@ -62,10 +64,12 @@ export abstract class ContentProvider<TScope extends string = string, TAuthData 
      */
     abstract apiRequest(data: BaseRequestData & { scope: TScope }): Promise<any>
 
+    getToken?(scope: TScope): Promise<string | null>
+
     /**
      * Loads services/plans from the content provider
      */
-    abstract loadServices(): Promise<void>
+    abstract loadServices(data?: any): Promise<void>
 
     /**
      * Handles startup load operations
@@ -93,6 +97,29 @@ export abstract class ContentProvider<TScope extends string = string, TAuthData 
     getContent?(key: string): Promise<ContentFile[]>
 
     /**
+     * Checks if a media item is licensed and returns its pingback URL + expiration (optional).
+     * Providers that don't implement expiration should return a MediaLicense with
+     * a far-future expiresAt.
+     */
+    checkMediaLicense?(mediaId: string): Promise<MediaLicense | null>
+
+    /**
+     * Determines if a specific URL from this provider should be encrypted (optional)
+     *
+     * @param url - The media URL to check
+     * @param pingbackUrl - Optional pingback URL indicating licensed content
+     * @returns true if the URL should be encrypted
+     */
+    shouldEncrypt?(url: string, pingbackUrl?: string): boolean
+
+    /**
+     * Returns the encryption key for this provider's media (optional)
+     *
+     * @returns The encryption key to use for encrypting/decrypting media
+     */
+    getEncryptionKey?(): string
+
+    /**
      * Validates if a scope is supported by this provider
      */
     protected validateScope(scope: string): scope is TScope {
@@ -105,14 +132,14 @@ export abstract class ContentProvider<TScope extends string = string, TAuthData 
     protected isTokenExpired(): boolean {
         if (!this.access) return true
         const now = Date.now() / 1000
-        return (this.access.created_at + this.access.expires_in) <= now
+        return this.access.created_at + this.access.expires_in <= now
     }
 
     /**
      * Sets up common Express routes for OAuth authentication
      */
     protected setupAuthRoutes(): void {
-        this.app.get(`${this.config.authPath || '/auth/complete'}`, (req, res) => {
+        this.app.get(`${this.config.authPath || "/auth/complete"}`, (req, res) => {
             this.handleAuthCallback(req, res)
         })
     }

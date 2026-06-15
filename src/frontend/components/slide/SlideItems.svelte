@@ -27,6 +27,7 @@
 
     export let slideIndex = 0
     export let preview = false
+    export let cropPreviewMode = false
     export let isTemplatePreview = false
     export let mirror = true
     export let isMirrorItem = false
@@ -78,11 +79,11 @@
     }
 
     $: cameraStyleString = `object-fit: ${item.fit || "contain"};filter: ${item.filter};transform: scale(${item.flipped ? "-1" : "1"}, ${item.flippedY ? "-1" : "1"});`
-    $: variableStyleString = item.style?.includes("font-size") && item.style.split("font-size:")[1].trim()[0] !== "0" ? "" : `font-size: ${edit ? autoSize : fontSize}px;`
+    $: variableStyleString = typeof item.style === "string" ? (item.style.includes("font-size") && item.style.split("font-size:")[1].trim()[0] !== "0" ? "" : `font-size: ${edit ? autoSize : fontSize}px;`) : ""
 </script>
 
 {#if item.type === "media"}
-    <MediaItem id="{ref.showId}_{ref.slideId}" {item} {outputId} slideRef={{ ...ref, slideIndex }} {preview} {mirror} {edit} />
+    <MediaItem id="{ref.showId}_{ref.slideId}" {item} {outputId} slideRef={{ ...ref, slideIndex }} {preview} {mirror} {edit} {cropPreviewMode} />
 {:else if item.type === "web"}
     <Website src={item.web?.src || ""} navigation={!edit && !item.web?.noNavigation} clickable={!edit && $currentWindow === "output"} {ratio} />
 {:else if item.type === "timer"}

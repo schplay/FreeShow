@@ -1,25 +1,39 @@
 <script lang="ts">
-    import { drawerTabsData } from "../../../stores"
-    import { setExampleTemplates } from "../../../utils/createData"
-    import { getAccess } from "../../../utils/profile"
-    import Icon from "../../helpers/Icon.svelte"
-    import T from "../../helpers/T.svelte"
-    import Button from "../../inputs/Button.svelte"
+    import { special } from "../../../stores"
+    import MaterialTextInput from "../../inputs/MaterialTextInput.svelte"
+    import MaterialToggleSwitch from "../../inputs/MaterialToggleSwitch.svelte"
+    import Center from "../../system/Center.svelte"
+    import Clock from "../../system/Clock.svelte"
+    import Date from "../../system/Date.svelte"
 
-    $: categoryId = $drawerTabsData.templates?.activeSubTab || ""
+    export let optionsOpen: boolean
 
-    const profile = getAccess("templates")
-    $: readOnly = profile.global === "read" || profile[categoryId] === "read"
+    function updateSpecial(value: any, key: string, allowEmpty = false) {
+        special.update((a) => {
+            if (!allowEmpty && !value) delete a[key]
+            else a[key] = value
+
+            return a
+        })
+    }
 </script>
 
-<div class="scroll" />
+<div class="scroll">
+    {#if optionsOpen}
+        <main style="overflow-x: hidden;padding: 10px;">
+            <MaterialTextInput label="settings.capitalize_words" title="settings.comma_seperated" value={$special.capitalize_words || ""} defaultValue="Jesus, Lord" on:change={(e) => updateSpecial(e.detail, "capitalize_words", true)} />
+            <!-- "text_can_overflow": "Allow text outside of the textbox bounds", -->
+            <!-- <MaterialToggleSwitch label="settings.text_can_overflow" checked={$special.textCanOverflow !== false} defaultValue={true} on:change={(e) => updateSpecial(e.detail, "textCanOverflow", true)} /> -->
 
-{#if !readOnly}
-    <Button style="width: 100%;" title="This will reset the defaults (shield icon). And pull in any new ones." on:click={setExampleTemplates} center dark>
-        <Icon id="reset" right />
-        <T id="actions.reset_defaults" />
-    </Button>
-{/if}
+            <MaterialToggleSwitch label="settings.style_template_preview" checked={$special.styleTemplatePreview !== false} defaultValue={true} on:change={(e) => updateSpecial(e.detail, "styleTemplatePreview", true)} />
+        </main>
+    {:else}
+        <Center>
+            <Clock />
+            <Date />
+        </Center>
+    {/if}
+</div>
 
 <style>
     .scroll {

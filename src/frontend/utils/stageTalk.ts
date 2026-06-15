@@ -4,11 +4,12 @@ import type { OutSlide } from "../../types/Show"
 import { runAction } from "../components/actions/actions"
 import { clone, keysToID } from "../components/helpers/array"
 import { getBase64Path } from "../components/helpers/media"
-import { getActiveOutputs } from "../components/helpers/output"
+import { getFirstOutput } from "../components/helpers/output"
+import { getCurrentProjectIndexes, getProjectItems } from "../components/helpers/projectProgress"
 import { getGroupName, getLayoutRef } from "../components/helpers/show"
 import { _show } from "../components/helpers/shows"
 import { getCustomStageLabel } from "../components/stage/stage"
-import { actions, events, groups, media, outputs, previewBuffers, showsCache, stageShows, timeFormat, timers, variables } from "../stores"
+import { actions, activeProject, activeShow, events, groups, media, outputs, previewBuffers, projects, showsCache, stageShows, timeFormat, timers, variables } from "../stores"
 import { connections } from "./../stores"
 import { translateText } from "./language"
 import { send } from "./request"
@@ -18,11 +19,12 @@ import { arrayToObject, filterObjectArray, sendData, setConnectedState } from ".
 export async function sendBackgroundToStage(outputId, updater = get(outputs), returnPath = false) {
     const currentOutput = updater[outputId]?.out
     const next = await getNextBackground(currentOutput?.slide || null, returnPath)
+    const next2 = await getNextBackground(currentOutput?.slide || null, returnPath, 2)
     let path = currentOutput?.background?.path || ""
     if (typeof path !== "string") path = ""
 
     if (returnPath) {
-        return clone({ path, mediaStyle: get(media)[path] || {}, next })
+        return clone({ path, mediaStyle: get(media)[path] || {}, next, next2 })
     }
 
     if (!path && !next.path?.length) {
@@ -33,7 +35,7 @@ export async function sendBackgroundToStage(outputId, updater = get(outputs), re
     const stageConnections = Object.keys(get(connections).STAGE || {})?.length || 0
     const base64path = stageConnections > 0 ? await getBase64Path(path) : ""
 
-    const bg = clone({ path: base64path, filePath: path, mediaStyle: get(media)[path] || {}, next })
+    const bg = clone({ path: base64path, filePath: path, mediaStyle: get(media)[path] || {}, next, next2 })
 
     if (returnPath) return bg
 
@@ -41,14 +43,13 @@ export async function sendBackgroundToStage(outputId, updater = get(outputs), re
     return
 }
 
-async function getNextBackground(currentOutputSlide: OutSlide | null, returnPath = false) {
+async function getNextBackground(currentOutputSlide: OutSlide | null, returnPath = false, slideOffset = 1) {
     if (!currentOutputSlide?.id) return {}
 
     const showRef = _show(currentOutputSlide.id).layouts([currentOutputSlide.layout]).ref()[0]
     if (!showRef) return {}
 
     // GET CORRECT INDEX OFFSET, EXCLUDING DISABLED SLIDES
-    const slideOffset = 1
     let layoutOffset = currentOutputSlide.index || 0
     let offsetFromCurrentExcludingDisabled = 0
     while (offsetFromCurrentExcludingDisabled < slideOffset && layoutOffset <= showRef.length) {
@@ -101,6 +102,14 @@ export const receiveSTAGE = {
         window.api.send(STAGE, { id: connectionId, channel: "VARIABLES", data: get(variables) })
         send(STAGE, ["DATA"], { timeFormat: get(timeFormat) })
 
+        // send media items
+        Object.values(layout.items).forEach(async (item) => {
+            if (item.type === "media" && item.src) {
+                const data = await getBase64Path(item.src)
+                send(STAGE, ["MEDIA"], { path: item.src, value: data })
+            }
+        })
+
         return layout
     },
 
@@ -112,7 +121,7 @@ export const receiveSTAGE = {
         const stageLayout = get(stageShows)[stageId]
         if (!stageLayout) return
 
-        const outputId = stageLayout.settings.output || getActiveOutputs(get(outputs), false, true, true)[0]
+        const outputId = stageLayout.settings.output || getFirstOutput()?.id
         const output = { ...get(outputs)[outputId], id: outputId }
         if (!output?.out) return
 
@@ -127,17 +136,25 @@ export const receiveSTAGE = {
         if (!stageId) return
 
         const stageLayout = get(stageShows)[stageId]
-        const outputId = stageLayout.settings.output || getActiveOutputs(get(outputs), false, true, true)[0]
-        const outSlideId = get(outputs)[outputId]?.out?.slide?.id
+        if (!stageLayout) return
 
-        if (!outSlideId) return
+        const outputId = stageLayout.settings.output || getFirstOutput()?.id
+        const outSlideId = get(outputs)[outputId]?.out?.slide?.id || ""
+        const show = get(showsCache)[outSlideId]
+        if (!show) return
 
-        return { id: outSlideId, show: get(showsCache)[outSlideId] }
+        // send media items
+        Object.values(show.media || {}).forEach(async (media) => {
+            const data = await getBase64Path(media.path || "")
+            send(STAGE, ["MEDIA"], { path: media.path, value: data })
+        })
+
+        return { id: outSlideId, show }
     },
 
     REQUEST_PROGRESS: (data: any) => {
         let outputId = data.outputId
-        if (!outputId) outputId = getActiveOutputs(get(outputs), false, true, true)[0]
+        if (!outputId) outputId = getFirstOutput()?.id
         if (!outputId) return
 
         const currentSlideOut = get(outputs)[outputId]?.out?.slide || null
@@ -166,13 +183,23 @@ export const receiveSTAGE = {
             return { name: name || "—", oneLetterName: (oneLetterName || "—").replace(" ", ""), index: ref.layoutIndex, child: a.type === "child" ? (currentLayoutRef[ref.layoutIndex]?.children || []).findIndex((id) => id === a.id) + 1 : 0 }
         })
 
-        data.progress = { currentShowSlide, slidesLength, layoutGroups }
+        // Project progress
+
+        const currentProjectItems = get(projects)[get(activeProject) || ""]?.shows || []
+        const activeProjectItem = get(activeShow)
+        const activeProjectItemIndex = typeof activeProjectItem?.index === "number" ? activeProjectItem.index : -1
+
+        const currentOut = get(outputs)[outputId]?.out || {}
+        const currentProjectIndexes = getCurrentProjectIndexes(currentProjectItems, currentOut, activeProjectItemIndex)
+        const projectItems = getProjectItems(currentProjectItems, get(showsCache))
+
+        data.progress = { currentShowSlide, slidesLength, layoutGroups, projectItems, currentProjectIndexes }
 
         return data
     },
     REQUEST_STREAM: (data: any) => {
         let id = data.outputId
-        if (!id) id = getActiveOutputs(get(outputs), false, true, true)[0]
+        if (!id) id = getFirstOutput()?.id
 
         if (!id) return
 
@@ -190,7 +217,7 @@ export const receiveSTAGE = {
 
     //     // WIP don't know the outputId
     //     // let id = data.outputId
-    //     let outputId = getActiveOutputs(get(outputs), false, true, true)[0]
+    //     let outputId = getFirstOutput()?.id
     //     if (!outputId) return
 
     //     data.data = get(videosData)[outputId]

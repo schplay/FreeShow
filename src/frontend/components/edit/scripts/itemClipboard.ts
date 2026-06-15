@@ -23,7 +23,8 @@ export function getBoxStyle(item: Item): StyleClipboard {
     if (!item) return { keys: {}, style: {} }
 
     // skip scripture verse numbers (customType)
-    const normalText = item.lines?.[0]?.text?.filter((a) => !a.customType) || []
+    const text = item.lines?.[0]?.text
+    const normalText = Array.isArray(text) ? text.filter((a) => !a.customType) : []
     const style = normalText[0]?.style || item.style
     const linesAlign = item.lines?.[0]?.align || ""
 
@@ -87,7 +88,7 @@ export function getSlideStyle(): StyleClipboard {
 
 export function getFilterStyle(): StyleClipboard {
     const ref = getLayoutRef()
-    const slideData = ref[get(activeEdit).slide!].data
+    const slideData = ref[get(activeEdit).slide!]?.data || {}
 
     const filterKeys = ["backdrop-filter", "filter"]
 
@@ -112,6 +113,8 @@ export async function setBoxStyle(styles: StyleClipboard[], slides: any, type: I
     }
 
     function updateSlideStyle(slide) {
+        if (!slide || !get(activeShow)) return
+
         const items: number[] = []
         const values: any[] = []
 
@@ -147,7 +150,7 @@ export async function setBoxStyle(styles: StyleClipboard[], slides: any, type: I
             //     location: { page: "edit", show: get(activeShow)!, slide: slide.id, items },
             // })
             showsCache.update((a) => {
-                ; (a[get(activeShow)!.id].slides[slide.id || ""]?.items || [])
+                ;(a[get(activeShow)!.id]?.slides[slide.id || ""]?.items || [])
                     .filter((_, i) => items.includes(i))
                     .forEach((item) => {
                         item.lines?.forEach((line) => {
@@ -177,6 +180,7 @@ export async function setBoxStyle(styles: StyleClipboard[], slides: any, type: I
             items.push(i)
 
             const currentStyle = styles[i] || styles[0]
+            if (!currentStyle) return
 
             let newStyle = ""
             Object.entries(currentStyle.style).forEach(([key, value]) => {
@@ -199,9 +203,10 @@ export async function setBoxStyle(styles: StyleClipboard[], slides: any, type: I
             if (!item.lines) return
 
             const newLines = item.lines.map((line) => {
-                if (!line.text) return
+                const textArr = line.text
+                if (!Array.isArray(textArr)) return
 
-                return line.text.map((text) => {
+                return textArr.map((text) => {
                     // don't style scripture verses
                     if (text.customType && !text.customType.includes("jw")) return text
 
@@ -249,6 +254,7 @@ export async function setItemStyle(styles: StyleClipboard[], slides: any) {
             items.push(i)
 
             const style = styles[i] || styles[0]
+            if (!style) return
 
             // get new style
             let newStyle = ""
@@ -272,6 +278,8 @@ export async function setItemStyle(styles: StyleClipboard[], slides: any) {
 
 export async function setSlideStyle(style: StyleClipboard, slides: any) {
     for (const slide of slides) {
+        if (slide.locked) continue // WIP get group slide
+
         updateSlideStyle(slide)
 
         // prevent lag when updating many slides
@@ -322,7 +330,10 @@ export function getItemKeys(isBox = false) {
 
 function getSpecialBoxValues(item: Item) {
     const keyValues: any = {}
-    const inputIds = Object.values(itemBoxes[item.type || "text"]?.sections || {}).map(a => a.inputs.flat()).flat().map(({ id }) => id)
+    const inputIds = Object.values(itemBoxes[item.type || "text"]?.sections || {})
+        .map((a) => a.inputs.flat())
+        .flat()
+        .map(({ id }) => id)
 
     inputIds.forEach((id) => {
         if (id === "style") return

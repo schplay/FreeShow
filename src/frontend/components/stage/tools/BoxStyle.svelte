@@ -6,6 +6,7 @@
     import { itemBoxes, setBoxInputValue } from "../../edit/values/boxes"
     import { clone } from "../../helpers/array"
     import { history } from "../../helpers/history"
+    import { getCustomMetadata } from "../../helpers/show"
     import { getStyles } from "../../helpers/style"
     import { updateStageShow } from "../stage"
     import { slideTextSections } from "../values/text"
@@ -20,8 +21,7 @@
     $: type = item?.type || ""
     $: {
         if (activeItemId.includes("tracker")) type = "slide_tracker"
-        else if (item?.type === "slide_text" || item?.type === "slide_notes" || item?.type === "variable" || activeItemId.includes("text") || activeItemId.includes("slide") || activeItemId.includes("notes") || activeItemId.includes("variable"))
-            type = "text"
+        else if (item?.type === "slide_text" || item?.type === "slide_notes" || item?.type === "variable" || activeItemId.includes("text") || activeItemId.includes("slide") || activeItemId.includes("notes") || activeItemId.includes("variable")) type = "text"
         else if (activeItemId.includes("clock")) type = "clock"
         else if (activeItemId.includes("timer")) type = "timer"
     }
@@ -35,9 +35,15 @@
         delete stageSections.scrolling
     }
     $: if (isSlideText) {
-        stageSections = clone(item?.keepStyle ? { default: slideTextSections.default } : slideTextSections)
+        stageSections = clone(item?.keepStyle ? { default: slideTextSections.default, chords: slideTextSections.chords, special: slideTextSections.special } : slideTextSections)
+
+        // line height
+        if (stageSections.text) stageSections.text = { inputs: [...stageSections.text.inputs, [{ id: "style", key: "line-height", type: "number", value: 1.1, multiplier: 10, extension: "em", values: { label: "edit.line_height", max: 50 } }]] }
 
         // setBoxInputValue(stageSections, "font", "font-weight", "default", "bold")
+
+        // allow no color (inherit from slide)
+        if (stageSections.font) stageSections.font.inputs[0][1].values.allowEmpty = true
     }
 
     $: if (stageSections?.CSS) {
@@ -81,8 +87,24 @@
     $: if (item?.type === "slide_tracker" || activeItemId?.includes("tracker")) {
         setBoxInputValue(stageSections, "default", "tracker.accent", "value", item?.tracker?.accent || $themes[$theme]?.colors?.secondary || "#F0008C")
 
+        const metadataLabelMap: Record<string, string> = {
+            number: "meta.number",
+            title: "meta.title",
+            artist: "meta.artist",
+            author: "meta.author",
+            composer: "meta.composer",
+            publisher: "meta.publisher",
+            copyright: "meta.copyright",
+            CCLI: "meta.CCLI",
+            year: "meta.year",
+            key: "meta.key"
+        }
+        const metadataOptions = [{ value: "name", label: "show.name" }, ...Object.keys(getCustomMetadata()).map((key) => ({ value: key, label: metadataLabelMap[key] || key }))]
+        setBoxInputValue(stageSections, "default", "tracker.projectMetadata", "options", metadataOptions)
+
         setBoxInputValue(stageSections, "default", "tracker.childProgress", "hidden", item?.tracker?.type !== "group")
         setBoxInputValue(stageSections, "default", "tracker.oneLetter", "hidden", item?.tracker?.type !== "group")
+        setBoxInputValue(stageSections, "default", "tracker.projectMetadata", "hidden", item?.tracker?.type !== "project")
     }
 
     $: if (item?.type === "camera") {
@@ -116,6 +138,7 @@
             let splitted = input.id.split(".")
             input.id = splitted[0]
             let newValue = item?.[input.id] || {}
+            if (typeof newValue === "string") return // something is wrong
             newValue[splitted[1]] = value
             value = newValue
         }
@@ -146,7 +169,10 @@
     function updateStyle(e: any) {
         let input = e.detail
 
-        if (input.key === "text-align" || input.key === "align-items") updateAlign(input)
+        if (input.key === "text-align" || input.key === "align-items") {
+            updateAlign(input)
+            return
+        }
 
         if (input.id === "nowrap") input = { ...input, id: "style", key: "white-space", value: input.value ? "nowrap" : undefined }
 

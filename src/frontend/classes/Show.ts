@@ -14,12 +14,7 @@ export class ShowObj implements Show {
     settings: any
     timestamps: any
     quickAccess: any
-    message?: {
-        text: string
-        template?: string
-    }
     metadata?: {
-        autoMedia?: boolean
         override: boolean
         display: string
         template: string
@@ -45,7 +40,7 @@ export class ShowObj implements Show {
         this.timestamps = {
             created,
             modified: null,
-            used: null,
+            used: null
         }
         this.quickAccess = {}
         this.meta = {}

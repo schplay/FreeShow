@@ -34,6 +34,7 @@
 
     let loaded = false
     $: if (parsedSrc) loaded = false
+    let webviewReady = false
 
     $: if (webview && ratio) setWebpageRatio()
     function setWebpageRatio() {
@@ -47,7 +48,11 @@
 
         if (loaded) setStyle()
         else {
-            webview?.addEventListener("dom-ready", websiteLoaded)
+            webview?.addEventListener("dom-ready", () => {
+                webviewReady = true
+                websiteLoaded()
+                checkNavigation()
+            })
             webview?.addEventListener("did-finish-load", setStyle)
             webview?.addEventListener("did-navigate", () => {
                 checkNavigation()
@@ -59,14 +64,29 @@
             if (!webview) return
             loaded = true
 
-            if ($currentWindow !== "output") webview.setAudioMuted(true)
+            if ($currentWindow !== "output") {
+                try {
+                    webview.setAudioMuted(true)
+                } catch (err) {
+                    console.debug("Failed to mute webview audio:", err)
+                }
+            }
 
-            webview.executeJavaScript(`
-            document.body.style.transform = 'scale(${isFullscreen ? 1 : ratio})';
-            document.body.style.transformOrigin = '0 0';
-            document.body.style.width = '${inverse}%';  // Scale factor inverse to maintain full width
-            document.body.style.height = '${inverse}%';  // Scale factor inverse to maintain full height
-        `)
+            webview
+                .executeJavaScript(
+                    `
+                if (document.body) {
+                    document.body.style.transform = 'scale(${isFullscreen ? 1 : ratio})';
+                    document.body.style.transformOrigin = '0 0';
+                    const scaleFactor = ${inverse};
+                    document.body.style.width = scaleFactor + '%';
+                    document.body.style.height = scaleFactor + '%';
+                }
+            `
+                )
+                .catch((err: any) => {
+                    console.debug("Webview executeJavaScript failed:", err)
+                })
         }
     }
 
@@ -99,8 +119,18 @@
     }
 
     function checkNavigation() {
-        backDisabled = !webview?.canGoBack()
-        forwardDisabled = !webview?.canGoForward()
+        if (!webviewReady || !webview) {
+            backDisabled = true
+            forwardDisabled = true
+            return
+        }
+
+        try {
+            backDisabled = !webview.canGoBack()
+            forwardDisabled = !webview.canGoForward()
+        } catch (err) {
+            console.debug("Webview navigation check failed:", err)
+        }
     }
 
     $: url = parsedSrc

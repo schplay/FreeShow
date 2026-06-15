@@ -1,7 +1,25 @@
+import crypto from "crypto"
+
 // clone objects
 export function clone<T>(object: T): T {
-    if (typeof object !== "object") return object
-    return JSON.parse(JSON.stringify(object))
+    if (object === null || typeof object !== "object") return object
+
+    try {
+        return structuredClone(object)
+    } catch {
+        return object
+    }
+}
+
+// a few keys might not be placed in the same order in JS object vs store file
+export function checkIfMatching(a: any, b: any): boolean {
+    try {
+        if (!a || !b || typeof a !== "object" || typeof b !== "object") return false
+        return JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort())
+    } catch (err) {
+        console.warn("Failed to compare store data:", err)
+        return false
+    }
 }
 
 // async wait (instead of timeouts)
@@ -37,4 +55,27 @@ export function waitUntilValueIsDefined(value: () => any, intervalTime = 50, tim
             clearInterval(interval)
         }
     })
+}
+
+export function getMachineId(): string {
+    try {
+        const { config } = require("../data/store")
+        let id = config?.get ? config.get("machineId") : undefined
+        if (id) return id
+
+        try {
+            // we need to store this value for now, because it's already used, but we can remove eventually once it's stored in the config for most users
+            const { machineIdSync } = require("node-machine-id")
+            id = machineIdSync()
+        } catch (machineIdErr) {
+            console.warn("Could not retrieve legacy hardware machine ID, generating UUID instead:", machineIdErr)
+            id = crypto.randomUUID()
+        }
+
+        if (config?.set) config.set("machineId", id)
+        return id
+    } catch (err) {
+        console.warn("Could not get machine ID from config store:", err)
+        return "fallback-machine-id"
+    }
 }

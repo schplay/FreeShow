@@ -8,10 +8,7 @@
     let slideWidth: number = 0
     let slideHeight: number = 0
     let ratio: number = 1
-    $: ratio = Math.min(
-        slideWidth / (resolution?.width || 1920),
-        slideHeight / (resolution?.height || 1080)
-    )
+    $: ratio = Math.min(slideWidth / (resolution?.width || 1920), slideHeight / (resolution?.height || 1080))
 
     // dynamic resolution
     if (dynamicResolution) resolution = { width: window.innerWidth, height: window.innerHeight }
@@ -29,6 +26,7 @@
 <style>
     .slide {
         position: relative;
+        overflow: hidden;
     }
 
     .slide:not(.relative) :global(.item) {
@@ -44,6 +42,7 @@
         font-family: system-ui;
         line-height: 1.1;
         -webkit-text-stroke-color: #000000;
+        paint-order: stroke fill;
         text-shadow: 2px 2px 10px #000000;
 
         border-style: solid;

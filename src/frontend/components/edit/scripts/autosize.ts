@@ -13,9 +13,10 @@ type Options = {
     defaultFontSize?: number // 50
     maxFontSize?: number // 800
     minFontSize?: number // 10
+    isList?: boolean // whether this is a list item (affects measurement)
 }
 
-export default function autosize(elem: HTMLElement, { type, textQuery, defaultFontSize, maxFontSize, minFontSize }: Options = {}) {
+export default function autosize(elem: HTMLElement, { type, textQuery, defaultFontSize, maxFontSize, minFontSize, isList }: Options = {}) {
     // set default values
     if (!minFontSize) minFontSize = MIN_FONT_SIZE
     if (!maxFontSize) maxFontSize = MAX_FONT_SIZE
@@ -60,8 +61,10 @@ export default function autosize(elem: HTMLElement, { type, textQuery, defaultFo
 
     size()
 
+    const finalResult = Math.min(maxFontSize, lowestValue)
+
     // prefer lowest value (due to margin)
-    return finish(Math.min(maxFontSize, lowestValue))
+    return finish(finalResult)
 
     function finish(value: number) {
         boxElem!.remove()
@@ -91,10 +94,21 @@ export default function autosize(elem: HTMLElement, { type, textQuery, defaultFo
     }
 
     function addStyleToElemText(currentFontSize: number) {
+        for (const elemWithChordSize of Array.from(boxElem!.querySelectorAll("[data-chord-size-ratio]"))) {
+            const htmlElem = elemWithChordSize as HTMLElement
+            const chordSizeRatio = Number(htmlElem.dataset.chordSizeRatio || "") || 0
+            if (!chordSizeRatio) continue
+
+            htmlElem.style.setProperty("--font-size", `${currentFontSize}px`)
+            htmlElem.style.setProperty("--chord-size", `${currentFontSize * chordSizeRatio}px`)
+        }
+
         let i = 0
         for (const textElem of Array.from(textChildren)) {
-            if (!styles[i]) styles[i] = textElem.getAttribute("style") || ""
-            textElem.setAttribute("style", styles[i] + `;overflow:visible;font-size: ${currentFontSize}px !important;`)
+            const htmlTextElem = textElem as HTMLElement
+            if (!styles[i]) styles[i] = htmlTextElem.getAttribute("style") || ""
+            const autosizeRatio = Number(htmlTextElem.dataset.autosizeRatio || "") || 1
+            htmlTextElem.setAttribute("style", styles[i] + `;overflow:visible;font-size: ${currentFontSize * autosizeRatio}px !important;`)
             i++
         }
     }
@@ -121,7 +135,37 @@ export default function autosize(elem: HTMLElement, { type, textQuery, defaultFo
         if (cloned.querySelector(".edit")) (cloned.querySelector(".edit") as HTMLElement).style.justifyContent = "center"
 
         for (const elemHide of Array.from(cloned.querySelectorAll(".hideFromAutosize"))) {
-            ; (elemHide as HTMLElement).style.display = "none"
+            ;(elemHide as HTMLElement).style.display = "none"
+        }
+
+        // fix chords size
+        for (const chordElem of Array.from(cloned.querySelectorAll(".chords"))) {
+            ;(chordElem as HTMLElement).style.maxHeight = "65px"
+        }
+
+        // scrolling text should not include repeated text in measurement
+        const scrollWrapper = cloned.querySelector(".scrollWrapper") as HTMLElement
+        if (scrollWrapper) scrollWrapper.style.setProperty("--copyCountHorizontal", "0")
+        // only keep first scrollContent element
+        const scrollContents = cloned.querySelectorAll(".scrollContent")
+        if (scrollContents.length > 1) {
+            scrollContents.forEach((elem, index) => {
+                if (index > 0) elem.remove()
+            })
+        }
+
+        // CRITICAL FIX FOR LIST ITEMS:
+        // List items have font-size on both the parent .break div AND the inner span elements
+        // This causes double font-size application during measurement
+        // We need to remove font-size from .break divs so only the spans (selected by textQuery) control sizing
+        if (isList) {
+            const breakElements = cloned.querySelectorAll(".break")
+            for (const breakElem of Array.from(breakElements)) {
+                const htmlBreak = breakElem as HTMLElement
+                const currentStyle = htmlBreak.getAttribute("style") || ""
+                const newStyle = currentStyle.replace(/font-size:\s*[^;]+;?/gi, "")
+                htmlBreak.setAttribute("style", newStyle)
+            }
         }
 
         elem.after(cloned)

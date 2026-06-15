@@ -13,8 +13,9 @@ export interface StageLayouts {
 
 export interface StageLayout {
     name: string
-    disabled: boolean
-    password: string
+    disabled?: boolean
+    password?: string // not in use
+    modified?: number // cloud sync
     settings: {
         output?: string
         background?: boolean

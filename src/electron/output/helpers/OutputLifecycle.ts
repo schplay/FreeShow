@@ -8,11 +8,28 @@ import { setDataNDI } from "../../ndi/talk"
 import { wait } from "../../utils/helpers"
 import { outputOptions } from "../../utils/windowOptions"
 import { OutputHelper } from "../OutputHelper"
+import { setOutputAlwaysOnTop } from "./OutputAlwaysOnTop"
 import { OutputVisibility } from "./OutputVisibility"
+import { initializeSender } from "../../blackmagic/bmdTalk"
+import { BlackmagicSender } from "../../blackmagic/BlackmagicSender"
 
 export class OutputLifecycle {
+    private static pendingCaptureStart: { [id: string]: NodeJS.Timeout } = {}
+
+    private static clearPendingCaptureStart(id: string) {
+        const pending = this.pendingCaptureStart[id]
+        if (!pending) return
+
+        clearTimeout(pending)
+        delete this.pendingCaptureStart[id]
+    }
+
     static async createOutput(output: Output) {
         const id: string = output.id || ""
+
+        if (output.webrtcData && output.webrtcData.streaming) {
+            output.webrtcData.streaming = false
+        }
 
         if (OutputHelper.getOutput(id)) {
             CaptureHelper.Lifecycle.stopCapture(id)
@@ -20,10 +37,15 @@ export class OutputLifecycle {
             return
         }
 
+        this.clearPendingCaptureStart(id)
+
+        // disable move/resize listeners during initialization
+        OutputHelper.Bounds.disableWindowMoveListener()
+
         const outputWindow = this.createOutputWindow({ ...output.bounds, alwaysOnTop: output.alwaysOnTop !== false, kiosk: output.kioskMode === true, backgroundColor: output.transparent ? "#00000000" : "#000000" }, id, output.name, output)
         // const previewWindow = this.createPreviewWindow({ ...output.bounds, backgroundColor: "#000000" })
 
-        OutputHelper.setOutput(id, { window: outputWindow, invisible: output.invisible, boundsLocked: output.boundsLocked })
+        OutputHelper.setOutput(id, { window: outputWindow, invisible: output.invisible, boundsLocked: output.boundsLocked, transparent: output.transparent, webrtcData: output.webrtcData })
         // OutputHelper.setOutput(id, { window: outputWindow, previewWindow: previewWindow })
         OutputHelper.Bounds.updateBounds({ id: output.id!, bounds: output.bounds })
 
@@ -31,16 +53,21 @@ export class OutputLifecycle {
 
         if (output.stageOutput && !CaptureHelper.Transmitter.stageWindows.includes(id)) CaptureHelper.Transmitter.stageWindows.push(id)
 
-        setTimeout(() => {
-            if (!CaptureHelper.Lifecycle) return // window closed before timeout finished
-            CaptureHelper.Lifecycle.startCapture(id, { ndi: output.ndi || false })
+        this.pendingCaptureStart[id] = setTimeout(() => {
+            delete this.pendingCaptureStart[id]
+
+            if (!CaptureHelper.Lifecycle || !OutputHelper.getOutput(id)) return // window closed before timeout finished
+            CaptureHelper.Lifecycle.startCapture(id, { ndi: output.ndi || false, blackmagic: !!output.blackmagic, webrtc: !!output.webrtcData?.streaming })
         }, 1200)
 
         // NDI
         if (output.ndi) {
-            await NdiSender.createSenderNDI(id, output.name)
+            await NdiSender.createSenderNDI(id, NdiSender.initNameNDI(output.ndiData?.name, output.name), output.ndiData?.groups)
             if (output.ndiData) setDataNDI({ id, ...output.ndiData })
         }
+
+        // Blackmagic
+        if (output.blackmagic) initializeSender(output, outputWindow, id)
     }
 
     /*
@@ -86,7 +113,7 @@ export class OutputLifecycle {
         if (isMac) window.minimize() // hide on mac
 
         window.once("show", () => {
-            if (options.alwaysOnTop) window?.setAlwaysOnTop(true, "pop-up-menu", 1)
+            if (options.alwaysOnTop) setOutputAlwaysOnTop(window, true)
         })
         // window.setVisibleOnAllWorkspaces(true)
 
@@ -100,8 +127,11 @@ export class OutputLifecycle {
     }
 
     static async removeOutput(id: string, reopen: Output | null = null) {
+        this.clearPendingCaptureStart(id)
+
         CaptureHelper.Lifecycle.stopCapture(id)
         NdiSender.stopSenderNDI(id)
+        BlackmagicSender.stop(id)
 
         const output = OutputHelper.getOutput(id)
         if (!output) return

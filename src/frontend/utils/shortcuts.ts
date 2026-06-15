@@ -5,54 +5,27 @@ import type { ShowType } from "../../types/Show"
 import type { DrawerTabIds, TopViews } from "../../types/Tabs"
 import { clearAudio } from "../audio/audioFading"
 import { AudioPlayer } from "../audio/audioPlayer"
+import { runActionId } from "../components/actions/actions"
 import { menuClick } from "../components/context/menuClick"
+import { createScriptureShow } from "../components/drawer/bible/scripture"
 import { addItem } from "../components/edit/scripts/itemHelpers"
-import { sortByName } from "../components/helpers/array"
+import { keysToID, sortByName } from "../components/helpers/array"
 import { copy, cut, deleteAction, duplicate, paste, selectAll } from "../components/helpers/clipboard"
 import { history, redo, undo } from "../components/helpers/history"
-import { getMediaStyle, getMediaType } from "../components/helpers/media"
-import { getActiveOutputs, refreshOut, setOutput, startFolderTimer, toggleOutputs } from "../components/helpers/output"
-import { nextSlideIndividual, previousSlideIndividual } from "../components/helpers/showActions"
-import { stopSlideRecording, updateSlideRecording } from "../components/helpers/slideRecording"
+import { getExtension, getMedia, getMediaLayerType, getMediaStyle, getMediaType } from "../components/helpers/media"
+import { getAllNormalOutputs, getFirstActiveOutput, refreshOut, setOutput, startFolderTimer, toggleOutputs } from "../components/helpers/output"
+import { OutputHelper } from "../components/helpers/OutputHelper"
 import { clearAll, clearBackground, clearSlide } from "../components/output/clear"
+import { getRecentlyUsedProjects, openProject } from "../components/show/project"
 import { importFromClipboard } from "../converters/importHelpers"
 import { addSection } from "../converters/project"
 import { requestMain, sendMain } from "../IPC/main"
 import { changeSlidesView } from "../show/slides"
-import {
-    activeDrawerTab,
-    activeEdit,
-    activeFocus,
-    activePage,
-    activePopup,
-    activeSlideRecording,
-    activeStage,
-    contextActive,
-    currentWindow,
-    drawer,
-    focusedArea,
-    focusMode,
-    guideActive,
-    media,
-    os,
-    outLocked,
-    outputs,
-    outputSlideCache,
-    quickSearchActive,
-    refreshEditSlide,
-    selected,
-    showsCache,
-    special,
-    spellcheck,
-    styles,
-    topContextActive,
-    videosData,
-    volume
-} from "../stores"
+import { activeDrawerTab, activeEdit, activeFocus, activePage, activePopup, activeProject, activeStage, alertMessage, contextActive, drawer, focusedArea, focusMode, guideActive, media, os, outLocked, outputs, projects, quickSearchActive, refreshEditSlide, selected, showRecentlyUsedProjects, special, spellcheck, styles, textEditActive, timelineRecordingAction, topContextActive, videosData, volume } from "../stores"
 import { audioExtensions, imageExtensions, videoExtensions } from "../values/extensions"
 import { drawerTabs } from "../values/tabs"
 import { activeShow } from "./../stores"
-import { hideDisplay, togglePanels } from "./common"
+import { hideDisplay, isOutputWindow, togglePanels, triggerFunction } from "./common"
 import { send } from "./request"
 import { save } from "./save"
 
@@ -61,7 +34,7 @@ const menus: TopViews[] = ["show", "edit", "stage", "draw", "settings"]
 const ctrlKeys = {
     a: () => selectAll(),
     c: () => copy(),
-    f: () => shouldOpenReplace() ? activePopup.set("find_replace") : null,
+    f: () => (shouldOpenReplace() ? activePopup.set("find_replace") : null),
     v: () => paste(),
     // give time for drawer to not toggle
     d: () => setTimeout(() => duplicate(get(selected))),
@@ -69,27 +42,39 @@ const ctrlKeys = {
     e: () => activePopup.set("export"),
     i: (e: KeyboardEvent) => (e.altKey ? importFromClipboard() : activePopup.set("import")),
     n: () => createNew(),
-    h: () => get(activeDrawerTab) === "scripture" ? "" : activePopup.set("history"),
+    h: () => (get(activeDrawerTab) === "scripture" ? "" : activePopup.set("history")),
     m: () => volume.set(get(volume) ? 0 : 1),
     o: () => toggleOutputs(),
     s: () => save(),
     t: () => togglePanels(),
     y: () => redo(),
     z: () => undo(),
-    Z: () => redo(),
     "?": () => activePopup.set("shortcuts")
 }
 
 const shiftCtrlKeys = {
-    d: () => get(activePage) === "show" && get(activeShow) && (get(activeShow)?.type || "show") === "show" ? activePopup.set("next_timer") : "",
+    d: () => (get(activePage) === "show" && get(activeShow) && (get(activeShow)?.type || "show") === "show" ? activePopup.set("next_timer") : ""),
     // t: () => activePopup.set("translate"),
+    t: () => {
+        // toggle text edit
+        if (get(activeShow)?.type !== "show") return
+        if (get(activePage) === "edit" && get(textEditActive)) {
+            activePage.set("show")
+            textEditActive.set(false)
+            return
+        }
+        if (!get(activeEdit)?.showId) activeEdit.set({ slide: 0, items: [], showId: get(activeShow)?.id })
+        textEditActive.set(true)
+        activePage.set("edit")
+    },
     f: () => menuClick("focus_mode"),
     n: () => activePopup.set("show"),
     v: () => changeSlidesView(),
+    z: () => redo()
 }
 
 const altKeys = {
-    Enter: () => get(activePage) === "show" ? menuClick("cut_in_half", true, null, null, null, get(selected)) : null,
+    Enter: () => (get(activePage) === "show" ? menuClick("cut_in_half", true, null, null, null, get(selected)) : null)
 }
 
 export const disablePopupClose = ["initialize", "cloud_method"]
@@ -115,13 +100,14 @@ const keys = {
 
         // blur focused elements
         if (document.activeElement !== document.body) {
-            ; (document.activeElement as HTMLElement).blur()
+            ;(document.activeElement as HTMLElement).blur()
 
             if (!popupId && get(selected).id) setTimeout(() => selected.set({ id: null, data: [] }))
             return
         }
 
-        if (disablePopupClose.includes(popupId || "")) return
+        if (popupId && disablePopupClose.includes(popupId)) return
+        if (popupId === "alert" && get(alertMessage) === "actions.closing") return
 
         // give time so output don't clear also
         setTimeout(() => {
@@ -129,10 +115,17 @@ const keys = {
             else if (get(selected).id) selected.set({ id: null, data: [] })
         }, 20)
     },
-    Delete: () => deleteAction(get(selected), "remove"),
+    Enter: () => {
+        // open last used project if Enter pressed "first" on startup
+        if (get(showRecentlyUsedProjects) && !get(activeShow) && get(activePage) === "show") {
+            const lastUsedProject = getRecentlyUsedProjects()[0]
+            if (lastUsedProject) openProject(lastUsedProject.id)
+        }
+    },
+    Delete: () => (get(contextActive) ? null : deleteAction(get(selected), "remove")),
     Backspace: () => keys.Delete(),
     // give time so it don't clear slide
-    F2: () => get(focusMode) ? null : setTimeout(() => menuClick("rename", true, null, null, null, get(selected))),
+    F2: () => (get(focusMode) ? null : setTimeout(() => menuClick("rename", true, null, null, null, get(selected)))),
     // default menu "togglefullscreen" role not working in production on Windows/Linux
     F11: () => (get(os).platform !== "darwin" ? sendMain(Main.FULLSCREEN) : null)
 }
@@ -145,7 +138,7 @@ export function keydown(e: KeyboardEvent) {
     // don't prevent close event
     if (e.key === "F4" && e.altKey) return
 
-    if (get(currentWindow) === "output") {
+    if (isOutputWindow()) {
         const currentOut = get(outputs)[Object.keys(get(outputs))[0]]?.out || {}
         const contentDisplayed = currentOut.slide?.id || currentOut.background?.path || currentOut.background?.id || currentOut.overlays?.length
         if (e.key === "Escape" && !contentDisplayed) return hideDisplay()
@@ -162,6 +155,15 @@ export function keydown(e: KeyboardEvent) {
     // clicking e.g. "Show" tab button will focus that making number tab change not work
     if (document.activeElement?.nodeName === "BUTTON") (document.activeElement as any).blur()
 
+    const isEditingText = () => {
+        const activeElem = document.activeElement as HTMLElement | null
+        if (activeElem?.closest(".editItem") || activeElem?.classList?.contains("edit")) return true
+
+        const selection = window.getSelection()
+        const anchorElem = (selection?.anchorNode as Element)?.nodeType === Node.ELEMENT_NODE ? (selection?.anchorNode as Element) : selection?.anchorNode?.parentElement
+        return !!anchorElem?.closest(".edit")
+    }
+
     if (e.ctrlKey || e.metaKey) {
         const drawerMenus = Object.keys(drawerTabs) as DrawerTabIds[]
         if (document.activeElement === document.body && Object.keys(drawerMenus).includes((Number(e.key) - 1).toString())) {
@@ -171,9 +173,13 @@ export function keydown(e: KeyboardEvent) {
             return
         }
 
-        let key = e.key === "Z" ? e.key : e.key.toLowerCase()
-        // include other special letter symbols (í=i)
-        if (e.keyCode === 73) key = "i"
+        // Use normalized key for shortcuts with Ctrl/Cmd to support all keyboard layouts
+        let key = getNormalizedKey(e)
+        // Handle shift+Z for redo
+        if (key === "z" && e.shiftKey) key = "Z"
+
+        // Let text formatting shortcuts be handled by edit tools when a text box is active.
+        if (isFormattingKey(e) && isEditingText()) return
 
         // use default input shortcuts on supported devices
         const exeption = ["e", "i", "n", "o", "s", "a", "z", "Z", "y"]
@@ -182,20 +188,35 @@ export function keydown(e: KeyboardEvent) {
             return
         }
 
+        key = key.toLowerCase()
+
         if (e.shiftKey && shiftCtrlKeys[key]) {
             e.preventDefault()
             shiftCtrlKeys[key](e)
             return
         }
 
-        const preventDefaults = ["z", "Z", "y"]
-        if (ctrlKeys[key]) {
-            ctrlKeys[key](e)
-            if (preventDefaults.includes(key) || macShortcutDebug) {
+        const preventDefaults = ["z", "y"]
+        const invokeCtrlShortcut = (k: string) => {
+            if (!k) return false
+
+            const handler = ctrlKeys[k]
+            if (!handler) return false
+            handler(e)
+
+            if (preventDefaults.includes(k) || macShortcutDebug) {
                 e.preventDefault()
                 if (get(activePage) === "edit") refreshEditSlide.set(true)
             }
+
+            return true
         }
+
+        if (invokeCtrlShortcut(key)) return
+
+        // fallback for macOS/Option-produced dead keys: try physical key code mapping
+        const phys = keyCodeMap[e.code]
+        if (phys) invokeCtrlShortcut(phys)
         return
     }
 
@@ -227,6 +248,65 @@ export function keydown(e: KeyboardEvent) {
     }
 }
 
+/**
+ * Normalize keyboard event to return the expected key character based on physical key position
+ * This fixes issues with non-Latin keyboard layouts (Cyrillic, etc.) where e.key returns
+ * different characters but we want shortcuts to work based on physical key position
+ *
+ * For example, on a Russian keyboard layout:
+ * - Physical Z key produces 'Я' character (e.key = 'Я')
+ * - But for Ctrl+Z shortcut, we want to detect the physical Z position (e.code = 'KeyZ')
+ * - This function maps 'KeyZ' -> 'z' regardless of keyboard layout
+ *
+ * This ensures shortcuts like Ctrl+Z, Ctrl+C, Ctrl+V work consistently across all keyboard layouts
+ */
+const cyrillicRegex = /[\u0400-\u04FF]/
+const latinShortcutRegex = /^[a-z]$/i
+const keyCodeMap: { [code: string]: string } = { KeyA: "a", KeyB: "b", KeyC: "c", KeyD: "d", KeyE: "e", KeyF: "f", KeyG: "g", KeyH: "h", KeyI: "i", KeyJ: "j", KeyK: "k", KeyL: "l", KeyM: "m", KeyN: "n", KeyO: "o", KeyP: "p", KeyQ: "q", KeyR: "r", KeyS: "s", KeyT: "t", KeyU: "u", KeyV: "v", KeyW: "w", KeyX: "x", KeyY: "y", KeyZ: "z" }
+
+type KeyboardNavigator = Navigator & {
+    keyboard?: {
+        getLayoutMap?: () => Promise<{ get(code: string): string | undefined }>
+    }
+}
+
+let keyboardLayoutMap: { get(code: string): string | undefined } | null = null
+const keyboard = typeof navigator === "undefined" ? undefined : (navigator as KeyboardNavigator).keyboard
+keyboard
+    ?.getLayoutMap?.()
+    .then((layoutMap) => (keyboardLayoutMap = layoutMap))
+    .catch(() => null)
+
+function getLayoutMappedShortcutKey(e: KeyboardEvent): string | null {
+    const layoutKey = keyboardLayoutMap?.get(e.code)
+    if (!layoutKey || layoutKey.length !== 1) return null
+
+    if (!latinShortcutRegex.test(layoutKey)) return null
+    return e.shiftKey ? layoutKey.toUpperCase() : layoutKey.toLowerCase()
+}
+
+function shouldNormalizeShortcutKey(e: KeyboardEvent): boolean {
+    return e.key.length === 1 && cyrillicRegex.test(e.key)
+}
+
+export function getNormalizedKey(e: KeyboardEvent): string {
+    const layoutMappedKey = getLayoutMappedShortcutKey(e)
+    if (layoutMappedKey) return layoutMappedKey
+
+    if (!shouldNormalizeShortcutKey(e)) return e.key
+
+    if (!keyCodeMap[e.code]) return e.key
+    if (e.shiftKey) return keyCodeMap[e.code].toUpperCase()
+    return keyCodeMap[e.code]
+}
+
+const formattingKeys = ["b", "i", "u"]
+export function isFormattingKey(e: KeyboardEvent): boolean {
+    if (!e.ctrlKey && !e.metaKey) return false
+    const key = getNormalizedKey(e).toLowerCase()
+    return formattingKeys.includes(key)
+}
+
 /// // PREVIEW /////
 
 export const previewCtrlShortcuts = {
@@ -247,7 +327,9 @@ export const previewShortcuts = {
         if (!presentationControllersKeysDisabled()) clearAll()
     },
     F1: () => {
-        if (!get(outLocked)) clearBackground()
+        if (get(outLocked)) return
+        clearBackground()
+        timelineRecordingAction.set({ id: "clear_background" })
     },
     F2: () => {
         // return if "rename" is selected
@@ -255,131 +337,92 @@ export const previewShortcuts = {
         if (presentationControllersKeysDisabled()) return false
 
         clearSlide()
+        timelineRecordingAction.set({ id: "clear_slide" })
         return true
     },
     F3: () => {
         if (get(outLocked)) return
         setOutput("overlays", [])
         setOutput("effects", [])
+        timelineRecordingAction.set({ id: "clear_overlays" })
     },
     F4: () => {
-        if (!get(outLocked)) clearAudio("", { clearPlaylist: true, commonClear: true })
+        if (get(outLocked)) return
+        clearAudio("", { clearPlaylist: true, commonClear: true })
+        timelineRecordingAction.set({ id: "clear_audio" })
     },
     F5: () => {
-        if (!presentationControllersKeysDisabled()) nextSlideIndividual(null)
+        if (!presentationControllersKeysDisabled()) OutputHelper.advanceOutputs()
         else setOutput("transition", null)
     },
-    PageDown: (e: KeyboardEvent) => {
-        // const currentShow = get(focusMode) ? get(activeFocus) : get(activeShow)
-        // if (!get(showsCache)[currentShow?.id || ""]) {
-        //     const outSlide = get(outputs)[getActiveOutputs(get(outputs), true, true, true)[0]]?.out?.slide
-        //     if (!nooutput && outSlide?.type !== "ppt" && outSlide?.type !== "pdf") return
-        // }
-        if (presentationControllersKeysDisabled()) return
 
-        e.preventDefault()
-        nextSlideIndividual(e)
-    },
-    PageUp: (e: KeyboardEvent) => {
-        // const currentShow = get(focusMode) ? get(activeFocus) : get(activeShow)
-        // if (!get(showsCache)[currentShow?.id || ""]) {
-        //     const outSlide = get(outputs)[getActiveOutputs(get(outputs), true, true, true)[0]]?.out?.slide
-        //     if (!nooutput && outSlide?.type !== "ppt" && outSlide?.type !== "pdf") return
-        // }
-        if (presentationControllersKeysDisabled()) return
-
-        e.preventDefault()
-        previousSlideIndividual(e)
-    },
-
-    ArrowRight: (e: any) => {
-        // if (get(activeShow)?.type !== "show" && get(activeShow)?.type !== undefined) return
-        if (get(outLocked) || e.ctrlKey || e.metaKey) return
-        if (!e.preview && (get(activeEdit).items.length || get(activeStage).items.length)) return
-        if (get(activeSlideRecording)) return updateSlideRecording("next")
+    " ": (e: KeyboardEvent) => {
+        if (get(contextActive)) return
 
         const currentShow = get(focusMode) ? get(activeFocus) : get(activeShow)
-        if (!get(showsCache)[currentShow?.id || ""]) {
-            const out = get(outputs)[getActiveOutputs()[0]]?.out
-            if (!out?.slide) {
-                if (currentShow?.type === "overlay" && !out?.overlays?.includes(currentShow?.id)) {
-                    e.preventDefault()
-                    return setOutput("overlays", currentShow.id, false, "", true)
-                } else if ((currentShow?.type === "video" || currentShow?.type === "image" || currentShow?.type === "player") && (out?.background?.path || out?.background?.id) !== currentShow?.id) {
-                    return togglePlayingMedia(e)
-                    // } else if (currentShow?.type === "folder") {
-                    //     return playMedia(e)
-                }
-                // WIP audio
-            }
+
+        // play section action if any
+        if (currentShow?.type === "section") {
+            const itemSettings = get(projects)[get(activeProject) || ""]?.shows?.find((s) => s.id === currentShow.id)?.data?.settings
+            const actionId = itemSettings?.triggerAction || get(special).sectionTriggerAction
+            if (actionId) runActionId(actionId)
         }
 
-        nextSlideIndividual(e)
+        // space bar should toggle timeline for show when active
+        if (isTimelineActive()) return
+
+        e.preventDefault()
+        OutputHelper.advanceOutputs(e)
+    },
+    ArrowRight: (e: any) => {
+        if (e.ctrlKey || e.metaKey) return
+        if (!e.preview && (get(activeEdit).items.length || get(activeStage).items.length)) return
+
+        // e.preventDefault()
+        OutputHelper.advanceOutputs(e)
     },
     ArrowLeft: (e: any) => {
-        // if (get(activeShow)?.type !== "show" && get(activeShow)?.type !== undefined) return
-        if (get(outLocked) || e.ctrlKey || e.metaKey) return
+        if (e.ctrlKey || e.metaKey) return
         if (!e.preview && (get(activeEdit).items.length || get(activeStage).items.length)) return
-        if (get(activeSlideRecording)) return updateSlideRecording("previous")
 
-        // const currentShow = get(focusMode) ? get(activeFocus) : get(activeShow)
-        // if (!get(showsCache)[currentShow?.id || ""]) {
-        //     const out = get(outputs)[getActiveOutputs()[0]]?.out
-        //     if (!out?.slide) {
-        //         if (currentShow?.type === "folder") {
-        //             return playMedia(e, true)
-        //         }
-        //     }
-        // }
-
-        previousSlideIndividual(e)
+        // e.preventDefault()
+        OutputHelper.advanceOutputs(e)
     },
-    " ": (e: KeyboardEvent) => {
-        const currentShow = get(focusMode) ? get(activeFocus) : get(activeShow)
-        if (currentShow?.type === "ppt") return
-        if (currentShow?.type === "pdf") {
-            e.preventDefault()
-            return nextSlideIndividual(e, true)
-        }
-        if (!get(showsCache)[currentShow?.id || ""]) {
-            if (currentShow?.type === "overlay") {
-                e.preventDefault()
-                return setOutput("overlays", currentShow.id, false, "", true)
-            }
-            return togglePlayingMedia(e)
-        }
-
-        const allActiveOutputs = getActiveOutputs(get(outputs), true, true, true)
-        const outputId = allActiveOutputs[0]
-        const currentOutput = outputId ? get(outputs)[outputId] || null : null
-        const outSlide = currentOutput?.out?.slide || get(outputSlideCache)[outputId] || {}
+    PageDown: (e: KeyboardEvent) => {
+        if (presentationControllersKeysDisabled()) return
 
         e.preventDefault()
-        if (outSlide.id !== currentShow?.id || (currentShow && outSlide.layout !== get(showsCache)[currentShow.id || ""].settings.activeLayout)) {
-            if (get(activeSlideRecording)) stopSlideRecording()
-            nextSlideIndividual(e, true)
-        } else {
-            if (get(activeSlideRecording)) return updateSlideRecording("next")
-            if (e.shiftKey) previousSlideIndividual(e)
-            else nextSlideIndividual(e)
-        }
+        OutputHelper.advanceOutputs(e)
+    },
+    PageUp: (e: KeyboardEvent) => {
+        if (presentationControllersKeysDisabled()) return
+
+        e.preventDefault()
+        OutputHelper.advanceOutputs(e)
     },
     Home: (e: KeyboardEvent) => {
-        const currentShow = get(focusMode) ? get(activeFocus) : get(activeShow)
-        if (!get(showsCache)[currentShow?.id || ""]) return
+        if (isTimelineActive()) {
+            triggerFunction("reset_timeline_view")
+            return
+        }
+
         if (presentationControllersKeysDisabled()) return
 
         e.preventDefault()
-        nextSlideIndividual(e, true)
+        OutputHelper.advanceOutputs(e)
     },
     End: (e: KeyboardEvent) => {
-        const currentShow = get(focusMode) ? get(activeFocus) : get(activeShow)
-        if (!get(showsCache)[currentShow?.id || ""]) return
         if (presentationControllersKeysDisabled()) return
 
         e.preventDefault()
-        nextSlideIndividual(e, false, true)
+        OutputHelper.advanceOutputs(e)
     }
+}
+
+function isTimelineActive() {
+    if (get(activePage) === "show") return get(special).timelineActive || get(special).projectTimelineActive
+    if (get(activePage) === "edit") return get(special).slideTimelineActive
+    return false
 }
 
 export function presentationControllersKeysDisabled() {
@@ -396,7 +439,8 @@ export function closeContextMenu() {
 function createNew() {
     const selectId = get(selected)?.id || get(focusedArea)
 
-    if (selectId === "slide")
+    if (get(activePage) === "show" && get(activeDrawerTab) === "scripture") createScriptureShow()
+    else if (selectId === "slide")
         history({ id: "SLIDES" }) // show
     else if (selectId === "show")
         addSection() // project
@@ -408,7 +452,7 @@ function createNew() {
     } else if (selectId === "overlay") history({ id: "UPDATE", location: { page: "drawer", id: "overlay" } })
     else if (selectId === "template") history({ id: "UPDATE", location: { page: "drawer", id: "template" } })
     else if (selectId === "global_timer") activePopup.set("timer")
-    else if (["action", "variable", "trigger"].includes(selectId)) activePopup.set(selectId as any)
+    else if (["action", "variable"].includes(selectId)) activePopup.set(selectId as any)
     else if (get(activePage) === "edit") addItem("text")
     else if (get(activePage) === "stage") history({ id: "UPDATE", location: { page: "stage", id: "stage" } })
     else {
@@ -417,18 +461,28 @@ function createNew() {
     }
 }
 
-export function togglePlayingMedia(e: Event | null = null, back = false) {
+// this only works if opened in preview - if not api
+export async function togglePlayingMedia(e: Event | null = null, back = false, api = false) {
     if (get(outLocked)) return
     // if ($focusMode || e.target?.closest(".edit") || e.target?.closest("input")) return
-    const item = get(focusMode) ? get(activeFocus) : get(activeShow)
+    let item = get(focusMode) ? get(activeFocus) : get(activeShow)
+
+    const currentOutput = getFirstActiveOutput()
+    const background = currentOutput?.out?.background
+    const currentlyPlaying = background?.path || background?.id
+    const backgroundType = background?.type
+
+    if (api) {
+        // get playing audio
+        let audioId = AudioPlayer.getAllPlaying(false)[0]
+        if (audioId) item = { id: audioId, type: "audio" }
+        else if (currentlyPlaying) item = { id: currentlyPlaying, type: backgroundType === "player" ? "player" : "video" }
+    }
 
     const type: ShowType | undefined = item?.type
     if (!item || !type) return
     e?.preventDefault()
 
-    const outputId: string = getActiveOutputs(get(outputs), false, true, true)[0]
-    const currentOutput = get(outputs)[outputId] || {}
-    const currentlyPlaying = currentOutput.out?.background?.path
     const alreadyPlaying = currentlyPlaying === item.id
 
     if (type === "video" || type === "image" || type === "player") {
@@ -436,28 +490,32 @@ export function togglePlayingMedia(e: Event | null = null, back = false) {
             // play / pause video
             // WIP duplicate of MediaControls.svelte
             const dataValues: any = {}
-            const activeOutputIds = getActiveOutputs(get(outputs), true, true, true)
-            const videoData = get(videosData)[outputId] || {}
+            const activeOutputIds = getAllNormalOutputs().map((a) => a.id)
+            const videoData = get(videosData)[currentOutput?.id || ""] || {}
             activeOutputIds.forEach((id) => {
-                dataValues[id] = { ...videoData, muted: id !== outputId ? true : videoData.muted, paused: !videoData.paused }
+                dataValues[id] = { ...videoData, muted: id !== currentOutput?.id ? true : videoData.muted, paused: !videoData.paused }
             })
 
             send(OUTPUT, ["DATA"], dataValues)
             return
         }
 
-        const outputStyle = get(styles)[currentOutput.style || ""]
+        // const currentStyle = getCurrentStyle(get(styles), currentOutput?.style)
+        const outputStyle = get(styles)[currentOutput?.style || ""]
         const mediaData = get(media)[item.id] || {}
         const mediaStyle = getMediaStyle(mediaData, outputStyle)
 
-        const videoType = mediaData.videoType
+        const videoType = getMediaLayerType(item.id, mediaStyle)
         const shouldLoop = videoType === "background" ? true : false
         const shouldBeMuted = videoType === "background" ? true : false
 
         // clear slide
         if (videoType === "foreground" || (videoType !== "background" && (type === "image" || !shouldLoop))) clearSlide()
 
-        setOutput("background", { type, path: item.id, muted: shouldBeMuted, loop: shouldLoop, ...mediaStyle })
+        const located = await getMedia(item.id)
+        if (!located) return
+
+        setOutput("background", { type, path: located.path, muted: shouldBeMuted, loop: shouldLoop, ...mediaStyle })
     } else if (type === "audio") {
         AudioPlayer.start(item.id, { name: (item as any).name || "" }, { pauseIfPlaying: true })
     } else if (type === "folder") {
@@ -465,14 +523,14 @@ export function togglePlayingMedia(e: Event | null = null, back = false) {
     }
 }
 
+// FolderShow.svelte shortcuts
 export async function playFolder(path: string, back = false) {
-    const outputId: string = getActiveOutputs(get(outputs), false, true, true)[0]
-    const currentOutput = get(outputs)[outputId] || {}
-    const currentlyPlaying = currentOutput.out?.background?.path
+    const currentOutput = getFirstActiveOutput()
+    const currentlyPlaying = currentOutput?.out?.background?.path
 
     const mediaExtensions = [...videoExtensions, ...imageExtensions, ...audioExtensions]
-    const files = await requestMain(Main.READ_FOLDER, { path })
-    const folderFiles = sortByName(files.files.filter((a) => mediaExtensions.includes(a.extension)).map((a) => ({ path: a.path, name: a.name, type: getMediaType(a.extension), thumbnail: a.thumbnailPath })))
+    const files = keysToID((await requestMain(Main.READ_FOLDER, { path })) || {})
+    const folderFiles = sortByName(files.filter((a) => mediaExtensions.includes(getExtension(a.name))).map((a) => ({ path: a.path, name: a.name, type: getMediaType(getExtension(a.name)) })))
     if (!folderFiles.length) return
 
     const mediaFiles = folderFiles.filter((a) => a.type !== "audio")
@@ -485,7 +543,7 @@ export async function playFolder(path: string, back = false) {
         AudioPlayer.start(folderFiles[allFilesIndex - 1].path, { name: folderFiles[allFilesIndex - 1].name })
     }
 
-    const outputStyle = get(styles)[currentOutput.style || ""]
+    const outputStyle = get(styles)[currentOutput?.style || ""]
     const mediaStyle = getMediaStyle(get(media)[newMedia.path], outputStyle)
 
     setOutput("background", { type: newMedia.type, path: newMedia.path, muted: false, loop: false, ...mediaStyle, folderPath: path })

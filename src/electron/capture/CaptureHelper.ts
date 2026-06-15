@@ -13,6 +13,7 @@ export class CaptureHelper {
     private static framerates: { [key: string]: number } = {
         stage: 20, // StageShow
         server: 10, // 30 // OutputShow
+        webrtc: 30, // WebRTC (canvas stream, up to 30 fps)
         unconnected: 1,
         connected: 30 // NDI
     }
@@ -23,15 +24,17 @@ export class CaptureHelper {
 
         const defaultFramerates = {
             ndi: this.framerates.connected,
+            blackmagic: this.framerates.unconnected,
             server: this.framerates.server,
-            stage: this.framerates.stage
+            stage: this.framerates.stage,
+            webrtc: this.framerates.webrtc
         }
 
         return {
             window,
             frameSubscription: null,
             displayFrequency: screen.displayFrequency || 60,
-            options: { ndi: false, server: false, stage: false },
+            options: { ndi: false, blackmagic: false, server: false, stage: false, webrtc: false },
             framerates: defaultFramerates,
             id
         }
@@ -40,6 +43,16 @@ export class CaptureHelper {
     // START
 
     static storedFrames: { [key: string]: NativeImage } = {}
+
+    static getMaxActiveFramerate(framerates: { [key: string]: number }, activeOptions: { [key: string]: boolean }): number {
+        const activeRates: number[] = []
+        if (activeOptions.ndi) activeRates.push(framerates.ndi || 1)
+        if (activeOptions.blackmagic) activeRates.push(framerates.blackmagic || 1)
+        if (activeOptions.server) activeRates.push(framerates.server || 1)
+        if (activeOptions.stage) activeRates.push(framerates.stage || 1)
+        if (activeOptions.webrtc) activeRates.push(framerates.webrtc || 1)
+        return activeRates.length > 0 ? Math.max(...activeRates) : 1
+    }
 
     static updateFramerate(id: string) {
         const output = OutputHelper.getOutput(id)

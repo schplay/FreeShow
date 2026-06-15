@@ -34,6 +34,7 @@
         if ($selected.id !== id) selected.set({ id, data: [data] })
         else if (!arrayHasData($selected.data, data)) {
             selected.update((s) => {
+                if (!Array.isArray(s.data)) s.data = []
                 s.data = [...s.data, data]
                 return s
             })
@@ -151,7 +152,7 @@
         }
 
         // shift select range
-        if (e.shiftKey && (shiftRange.length || $selected.data[0]?.index !== undefined)) {
+        if (e.shiftKey && ((shiftRange.length && $selected.data[0]) || $selected.data[0]?.index !== undefined)) {
             const searchKeys = ["id", "index", "path"]
             let lastSelected = $selected.data[$selected.data.length - 1]
             if (!lastSelected) return
@@ -163,10 +164,13 @@
 
             let selectedBetween: number[] = range(lowestNumber, highestNumber)
             function range(start: number, end: number) {
-                return Array(end - start + 1)
+                return Array(Math.abs(end - start) + 1)
                     .fill("")
                     .map((_, idx) => start + idx)
             }
+
+            // nothing in between
+            if (newIndex - 1 === lastSelectedIndex || newIndex + 1 === lastSelectedIndex) selectedBetween = [selectedBetween[0]]
 
             let dataBetween = selectedBetween.map((index) => (shiftRange.length ? shiftRange[index] : { index }))
             let allNewData = [...$selected.data, ...dataBetween, data]
@@ -176,10 +180,13 @@
             if (shiftRange) {
                 allNewData = allNewData
                     .map((data) => {
+                        if (!data) return null
+
                         let newData: any = {}
                         keys.forEach((key) => {
                             newData[key] = data[key]
                         })
+
                         return newData
                     })
                     .filter((a) => a)
@@ -321,19 +328,7 @@
     }}
 />
 
-<div
-    {id}
-    data-item={JSON.stringify(data)}
-    {draggable}
-    style={$$props.style}
-    class="selectElem {$$props.class || ''}"
-    class:fill
-    class:isSelected={selectable && $selected.id === id && arrayHasData($selected.data, data)}
-    bind:this={elem}
-    on:mouseenter={enter}
-    on:mousedown={mousedown}
-    on:dragstart={(e) => mousedown(e, true)}
->
+<div {id} data-item={JSON.stringify(data)} {draggable} style={$$props.style} class="selectElem {$$props.class || ''}" class:fill class:isSelected={selectable && $selected.id === id && arrayHasData($selected.data, data)} bind:this={elem} on:mouseenter={enter} on:mousedown={mousedown} on:dragstart={(e) => mousedown(e, true)}>
     <!-- on:mouseup={mouseup}
     on:contextmenu={contextmenu} -->
     <!-- TODO: validateDrop(id, $selected.id, true) -->

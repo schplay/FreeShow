@@ -1,24 +1,56 @@
+import { nativeImage } from "electron"
 import { type ICommonTagsResult, parseFile } from "music-metadata"
 import { join } from "path"
 import { ToMain } from "../../types/IPC/ToMain"
 import { sendToMain } from "../IPC/main"
-import { deleteFile, doesPathExist, getDataFolderPath, writeFile } from "../utils/files"
+import { deleteFile, doesPathExist, getDataFolderPath, openInSystem, writeFile } from "../utils/files"
 
 const fileNameText = "NowPlaying.txt"
 const fileNameImage = "NowPlayingCover.png"
 
+type NowPlayingData = {
+    filePath: string
+    name: string
+    unknownLang: string[]
+    format: string
+    duration: number
+}
+
 // let currentContent = ""
-export async function setPlayingState(data: { filePath: string; name: string; unknownLang: string[] }) {
+export async function setPlayingState(data: NowPlayingData) {
     const audioFolder = getDataFolderPath("audio")
 
     // get metadata
     const metadata = await getAudioMetadata(data.filePath)
-    const artist = (metadata ? getArtist(metadata) : "") || data.unknownLang[0] || "Unknown Artist"
-    const title = metadata?.title || data.name || data.unknownLang[1] || "Unknown Title"
-    const album = metadata?.album || data.unknownLang[2] || "Unknown Album"
+    // const artist = (metadata ? getArtist(metadata) : "") || data.unknownLang[0] || "Unknown Artist"
+    // const title = metadata?.title || data.name || data.unknownLang[1] || "Unknown Title"
+    // const album = metadata?.album || data.unknownLang[2] || "Unknown Album"
+
+    // create album art cover BEFORE converting dynamic values
+    const filePathCover = join(audioFolder, fileNameImage)
+    const cover = metadata?.picture?.[0]
+    const buffer = cover?.data
+    let coverBuffer: Buffer | undefined
+    if (!buffer) {
+        if (doesPathExist(filePathCover)) {
+            deleteFile(filePathCover)
+        }
+    } else {
+        const img = nativeImage.createFromBuffer(buffer)
+        writeFile(filePathCover, img.toPNG())
+
+        const { width, height } = img.getSize()
+        if (width > 640 || height > 480) {
+            const scale = Math.min(640 / width, 480 / height)
+            coverBuffer = img.resize({ width: Math.round(width * scale), height: Math.round(height * scale) }).toJPEG(90)
+        } else {
+            coverBuffer = buffer
+        }
+    }
 
     // format: Artist - Title - Album
-    const content = `${artist} - ${title} - ${album}`
+    // const content = `${artist} - ${title} - ${album}`
+    const content = await convertDynamicValues(data, metadata, coverBuffer)
     // currentContent = content
 
     // create playing data text file
@@ -28,19 +60,51 @@ export async function setPlayingState(data: { filePath: string; name: string; un
     // (no point in this at the moment)
     // serve "text file" on local server
     // startServer()
+}
 
-    // create album art cover
-    const filePathCover = join(audioFolder, fileNameImage)
-    const cover = metadata?.picture?.[0]
-    const buffer = cover?.data
-    if (!buffer) {
-        if (doesPathExist(filePathCover)) {
-            deleteFile(filePathCover)
+// , "{time}", "{time_s}"
+const dynamicValues = ["{artist}", "{title}", "{album}", "{year}", "{artwork_path}", "{artwork_base64}", "{duration}", "{duration_s}"]
+async function convertDynamicValues(data: NowPlayingData, metadata: ICommonTagsResult | null, coverBuffer: Buffer | undefined) {
+    if (!data.format) data.format = `{artist} - {title} - {album}`
+
+    dynamicValues.forEach((value) => {
+        data.format = data.format.replaceAll(value, replaceValue(value))
+    })
+
+    return data.format
+
+    function replaceValue(value: string) {
+        switch (value) {
+            case "{artist}":
+                return (metadata ? getArtist(metadata) : "") || data.unknownLang[0] || "Unknown Artist"
+            case "{title}":
+                return metadata?.title || data.name || data.unknownLang[1] || "Unknown Title"
+            case "{album}":
+                return metadata?.album || data.unknownLang[2] || "Unknown Album"
+            case "{year}":
+                return metadata?.year?.toString() || "Unknown Year"
+            case "{artwork_path}":
+            case "{artwork_base64}":
+                const audioFolder = getDataFolderPath("audio")
+                const coverFilePath = join(audioFolder, fileNameImage)
+                if (value === "{artwork_path}") return coverFilePath
+
+                if (!coverBuffer) return ""
+                const base64String = coverBuffer.toString("base64")
+                return `data:image/jpeg;base64,${base64String}`
+            case "{duration}":
+            case "{duration_s}":
+                if (value === "{duration_s}") return data.duration.toString()
+
+                if (!data.duration) return "00:00"
+                const totalSeconds = Math.floor(data.duration)
+                const minutes = Math.floor(totalSeconds / 60)
+                const seconds = totalSeconds % 60
+                return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+            default:
+                return ""
         }
-        return
     }
-
-    writeFile(filePathCover, buffer)
 }
 
 // same as frontend function
@@ -60,6 +124,12 @@ export function unsetPlayingAudio() {
     if (doesPathExist(filePathCover)) {
         deleteFile(filePathCover)
     }
+}
+
+export function openNowPlaying() {
+    const audioFolder = getDataFolderPath("audio")
+    const filePath = join(audioFolder, fileNameText)
+    openInSystem(filePath)
 }
 
 // const app = express()
@@ -98,6 +168,7 @@ async function getAudioMetadata(filePath: string): Promise<ICommonTagsResult | n
             resolve(metadata)
         } catch (err: any) {
             console.error("Error parsing metadata:", err.message)
+            resolve(null)
         }
     })
 }

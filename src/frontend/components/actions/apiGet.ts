@@ -1,14 +1,13 @@
 import { get } from "svelte/store"
 import type { Shows } from "../../../types/Show"
-import { activePlaylist, audioPlaylists, outputs, playingAudio, playingVideos, projects, shows, showsCache, videosTime } from "../../stores"
+import { activePlaylist, audioPlaylists, outputs, playingAudio, playingVideos, projects, shows, showsCache, variables, videosData, videosTime } from "../../stores"
 import { getTextLines } from "../edit/scripts/textStyle"
-import { getActiveOutputs } from "../helpers/output"
+import { keysToID } from "../helpers/array"
+import { getFirstActiveOutput } from "../helpers/output"
 import { loadShows } from "../helpers/setShow"
 import { getLayoutRef } from "../helpers/show"
 import { _show } from "../helpers/shows"
-import { variables } from "../../stores"
 import type { API_id_optional, API_slide } from "./api"
-import { keysToID } from "../helpers/array"
 
 export function getShows() {
     return get(shows) as Shows
@@ -33,14 +32,12 @@ export function getProject({ id }: { id: string }) {
 }
 
 export function getOutput(data: API_id_optional) {
-    const outputId = data?.id || getActiveOutputs(get(outputs))[0]
-    const output = get(outputs)[outputId]
+    const output = data?.id ? get(outputs)[data.id] : getFirstActiveOutput()
     return output?.out || null
 }
 
 export function getOutputSlideText() {
-    const outputId = getActiveOutputs(get(outputs))[0]
-    const outputSlide = get(outputs)[outputId]?.out?.slide
+    const outputSlide = getFirstActiveOutput()?.out?.slide
     const layoutRef = _show(outputSlide?.id).layouts([outputSlide?.layout]).ref()[0] || []
     const slideId = layoutRef[outputSlide?.index ?? -1]?.id
     const slide = _show(outputSlide?.id).get("slides")?.[slideId]
@@ -48,8 +45,7 @@ export function getOutputSlideText() {
 }
 
 export function getOutputGroupName() {
-    const outputId = getActiveOutputs(get(outputs))[0]
-    const outputSlide = get(outputs)[outputId]?.out?.slide
+    const outputSlide = getFirstActiveOutput()?.out?.slide
     const layoutRef = _show(outputSlide?.id).layouts([outputSlide?.layout]).ref()[0] || []
     const slideId = layoutRef[outputSlide?.index ?? -1]?.id
     const slide = _show(outputSlide?.id).get("slides")?.[slideId]
@@ -57,17 +53,35 @@ export function getOutputGroupName() {
 }
 
 export function getPlayingVideoDuration() {
-    const outputId = getActiveOutputs(get(outputs))[0]
-    const outputPath = get(outputs)[outputId]?.out?.background?.path || ""
+    const outputPath = getFirstActiveOutput()?.out?.background?.path || ""
     const video = get(playingVideos)[outputPath] || {}
     const time: number = video?.duration || video?.video?.duration || 0
     return time
 }
 
 export function getPlayingVideoTime() {
-    const outputId = getActiveOutputs(get(outputs))[0]
+    const outputId = getFirstActiveOutput()?.id || ""
     const time: number = get(videosTime)[outputId] || 0
     return time
+}
+
+export function getPlayingVideoState() {
+    const output = getFirstActiveOutput()
+    const outputId = output?.id || ""
+    const bg = output?.out?.background
+    const path = bg?.path || bg?.id || ""
+
+    const playingList = (get(playingVideos) as any[]) || []
+    const videoEntry = playingList.find((v: any) => v?.id === path) || {}
+    const videoData = get(videosData)[outputId] || {}
+
+    const duration = videoData?.duration ?? videoEntry?.duration ?? videoEntry?.video?.duration ?? 0
+    const time = get(videosTime)[outputId] ?? videoEntry?.time ?? videoEntry?.video?.currentTime ?? 0
+    const paused = videoData?.paused ?? videoEntry?.paused ?? videoEntry?.video?.paused ?? false
+    const loop = bg?.loop !== false // default to true
+    const muted = bg?.muted !== false // default to true
+
+    return { duration, time, paused, loop, muted }
 }
 
 export function getPlayingAudioDuration() {
@@ -123,10 +137,8 @@ export function getVariable(data: { id?: string; name?: string }) {
     }
 
     if (data.name) {
-        return keysToID(get(variables)).find(a => a.name === data.name) || null
+        return keysToID(get(variables)).find((a) => a.name === data.name) || null
     }
 
     return null
 }
-
-

@@ -54,13 +54,26 @@
 
     let editOpened: boolean = false
     let textValue = ""
-    $: if (editOpened && $textCache[$activeShow?.id || ""]) setText()
-    else reset()
+    let editSeedValue = ""
+
+    $: {
+        const showId = $activeShow?.id || ""
+
+        if (!editOpened) {
+            reset()
+            editSeedValue = ""
+        } else {
+            const cachedText = $textCache[showId]
+            // Only hydrate from cache while the draft is still untouched.
+            if (typeof cachedText === "string" && textValue === editSeedValue && cachedText !== editSeedValue) {
+                textValue = cachedText
+                editSeedValue = cachedText
+            }
+        }
+    }
+
     function reset() {
         textValue = ""
-    }
-    function setText() {
-        textValue = $textCache[$activeShow?.id || ""]
     }
     function done() {
         if (addGroups) {
@@ -260,11 +273,21 @@
         scrollbar-width: thin; /* Firefox */
         scrollbar-color: rgb(255 255 255 / 0.3) rgb(255 255 255 / 0.05);
     }
-    .scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .scroll::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
     .scroll::-webkit-scrollbar-track,
-    .scroll::-webkit-scrollbar-corner { background: rgb(255 255 255 / 0.05); }
-    .scroll::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.3); border-radius: 8px; }
-    .scroll::-webkit-scrollbar-thumb:hover { background: rgb(255 255 255 / 0.5); }
+    .scroll::-webkit-scrollbar-corner {
+        background: rgb(255 255 255 / 0.05);
+    }
+    .scroll::-webkit-scrollbar-thumb {
+        background: rgb(255 255 255 / 0.3);
+        border-radius: 8px;
+    }
+    .scroll::-webkit-scrollbar-thumb:hover {
+        background: rgb(255 255 255 / 0.5);
+    }
 
     @media screen and (max-width: 1000px) {
         .scroll {

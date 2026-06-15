@@ -3,7 +3,7 @@
     import { get } from "svelte/store"
     import { uid } from "uid"
     import type { Tag } from "../../../../types/Show"
-    import { actionTags, activeActionTagFilter, activeMediaTagFilter, activeTagFilter, globalTags, mediaTags, popupData, variableTags } from "../../../stores"
+    import { actionTags, activeActionTagFilter, activeMediaTagFilter, activePlayerTagFilter, activeTagFilter, activeTimerTagFilter, globalTags, mediaTags, playerTags, popupData, timerTags, variableTags } from "../../../stores"
     import { keysToID, sortByName } from "../../helpers/array"
     import T from "../../helpers/T.svelte"
     import InputRow from "../../input/InputRow.svelte"
@@ -15,8 +15,10 @@
     const store = {
         show: () => globalTags,
         media: () => mediaTags,
+        player: () => playerTags,
         action: () => actionTags,
-        variable: () => variableTags
+        variable: () => variableTags,
+        timer: () => timerTags
     }
 
     let type: keyof typeof store = $popupData.type || "show"
@@ -50,7 +52,9 @@
         })
         if (type === "show") activeTagFilter.set([])
         else if (type === "media") activeMediaTagFilter.set([])
+        else if (type === "player") activePlayerTagFilter.set([])
         else if (type === "action") activeActionTagFilter.set([])
+        else if (type === "timer") activeTimerTagFilter.set([])
 
         getTags()
     }

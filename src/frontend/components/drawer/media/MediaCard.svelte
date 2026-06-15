@@ -1,13 +1,15 @@
 <script lang="ts">
     import { derived } from "svelte/store"
+    import type { ContentFile, ContentProviderId } from "../../../../electron/contentProviders/base/types"
     import type { MediaStyle } from "../../../../types/Main"
     import type { ShowType } from "../../../../types/Show"
-    import { activeShow, customMessageCredits, media, mediaOptions, mediaTags, outLocked, outputs, photoApiCredits, special, styles } from "../../../stores"
+    import { addProjectItem } from "../../../converters/project"
+    import { activeShow, customMessageCredits, media, mediaOptions, mediaTags, outLocked, outputs, photoApiCredits, styles } from "../../../stores"
     import { translateText } from "../../../utils/language"
     import { getKey } from "../../../values/keys"
     import Icon from "../../helpers/Icon.svelte"
-    import { getMediaStyle } from "../../helpers/media"
-    import { findMatchingOut, getActiveOutputs, setOutput } from "../../helpers/output"
+    import { getMediaLayerType, getMediaStyle, getMediaType, loadThumbnail } from "../../helpers/media"
+    import { findMatchingOut, getAllActiveOutputs, getFirstActiveOutput, setOutput } from "../../helpers/output"
     import Button from "../../inputs/Button.svelte"
     import { clearBackground, clearSlide } from "../../output/clear"
     import SelectElem from "../../system/SelectElem.svelte"
@@ -22,7 +24,27 @@
     export let shiftRange: any[] = []
     export let thumbnailPath = ""
     export let thumbnail = true
-    export let contentProvider = false
+    export let loadFullImage = false
+    export let contentProvider: ContentProviderId | false = false
+    export let contentFileData: ContentFile | null = null
+
+    let failed = false
+    $: if (thumbnail && !thumbnailPath && !loadFullImage) getThumbnail()
+    async function getThumbnail() {
+        failed = false
+        thumbnailPath = await loadThumbnail(path)
+        if (!thumbnailPath) failed = true
+    }
+
+    // Store ContentFile object and display name for later use (license check, convert to show, etc.)
+    $: if (contentFileData && contentProvider && path) {
+        media.update((m) => {
+            if (!m[path]) m[path] = {}
+            m[path].contentFile = { ...contentFileData, providerId: contentProvider }
+            m[path].name = name
+            return m
+        })
+    }
 
     // Memoized name computation
     let displayName = ""
@@ -33,9 +55,6 @@
             displayName = newName
         }
     }
-
-    export let activeFile: null | number
-    export let allFiles: string[]
 
     let loaded = true
     let videoElem: HTMLVideoElement | undefined
@@ -54,20 +73,10 @@
 
         let time = Math.floor(duration * ((Math.floor(percentage * steps) * steps + steps) / 100))
         if (time && videoElem.currentTime === time) return
+        if (!isFinite(time)) return
 
         if (Number(time) === time) videoElem.currentTime = time
     }
-
-    // Memoized index calculation
-    let cachedIndex = -1
-    let cachedPath = ""
-    $: {
-        if (cachedPath !== path) {
-            cachedIndex = allFiles.findIndex((a) => a === path)
-            cachedPath = path
-        }
-    }
-    $: index = cachedIndex
 
     function mousedown(e: any) {
         if (e.ctrlKey || e.metaKey) return
@@ -113,16 +122,16 @@
             return
         }
 
-        let videoType = mediaStyle.videoType || ""
+        let videoType = getMediaLayerType(path, mediaStyle)
         let loop = contentProvider || videoType === "foreground" ? false : true
         let muted = videoType === "background" ? true : false
         if (videoType === "foreground") clearSlide()
 
         // get style per output
-        getActiveOutputs().forEach((outputId) => {
-            const currentOutputStyle = $styles[$outputs[outputId]?.style || ""]
+        getAllActiveOutputs().forEach((output) => {
+            const currentOutputStyle = $styles[output.style || ""]
             const currentMediaStyle = getMediaStyle($media[path], currentOutputStyle)
-            setOutput("background", { path, type, loop, muted, startAt: 0, ...currentMediaStyle, ignoreLayer: videoType === "foreground" }, false, outputId)
+            setOutput("background", { path, type, loop, muted, startAt: 0, ...currentMediaStyle, ignoreLayer: videoType === "foreground" }, false, output.id)
         })
 
         // unsplash requires the download to be triggered when using their images
@@ -137,11 +146,13 @@
     function dblclick(e: any) {
         if (e.ctrlKey || e.metaKey || iconClicked) return
 
-        activeFile = index
+        // add to project
+        const data = { id: path, name, type: getMediaType(path.slice(path.lastIndexOf(".") + 1, path.length)) }
+        addProjectItem(data)
     }
 
     // Memoized output and style computation
-    const currentOutput = derived(outputs, ($outputs) => $outputs[getActiveOutputs()[0]])
+    const currentOutput = derived(outputs, ($outputs) => getFirstActiveOutput($outputs))
     const currentStyle = derived([currentOutput, styles], ([$currentOutput, $styles]) => $styles[$currentOutput?.style || ""] || {})
 
     // Memoized media style computation
@@ -190,10 +201,10 @@
     }
 </script>
 
-<SelectElem id="media" class="context #media_card" data={{ name, path, type }} {shiftRange} draggable fill>
+<SelectElem id="media" class="context #media_card" data={{ name, path, type, contentProvider }} {shiftRange} draggable fill>
     <Card
         resolution={{ width: 16, height: 9 }}
-        {loaded}
+        loaded={(loaded && ($mediaOptions.mode === "grid" ? thumbnailPath !== "" || loadFullImage : true)) || failed}
         style={thumbnail ? `width: ${$mediaOptions.mode === "grid" ? 100 : 100 / $mediaOptions.columns}%;` : ""}
         mode={$mediaOptions.mode}
         width={100}
@@ -201,11 +212,11 @@
         outlineColor={findMatchingOut(path, $outputs)}
         active={findMatchingOut(path, $outputs) !== null}
         label={displayName}
-        title={path}
+        title={contentProvider ? "" : path}
         icon={thumbnail ? icon : null}
         white={type === "image"}
         showPlayOnHover
-        checkered={mediaStyle.fit !== "blur"}
+        checkered={$mediaOptions.mode === "grid" && mediaStyle.fit !== "blur" && !failed}
         on:mousedown={mousedown}
         on:click={click}
         on:dblclick={dblclick}
@@ -228,7 +239,7 @@
                 <div style="max-width: 100%;">
                     <div class="button">
                         <Button style="padding: 3px;" redHover title={translateText("actions.remove")} on:click={() => removeStyle("videoType")}>
-                            <Icon id={mediaStyle.videoType === "background" ? "muted" : mediaStyle.videoType === "foreground" ? "volume" : ""} size={0.9} white />
+                            <Icon id={`type_${mediaStyle.videoType}`} size={0.9} white />
                         </Button>
                     </div>
                 </div>
@@ -256,8 +267,14 @@
             {/if}
         </div>
 
-        {#if thumbnail && !$special.optimizedMode}
-            <MediaLoader bind:loaded bind:hover bind:duration bind:videoElem {resolution} {type} {path} {thumbnailPath} {name} {mediaStyle} />
+        {#if failed}
+            <div class="icon">
+                <Icon size={2.5} id="close" style="color: var(--disconnected);" white />
+            </div>
+        {:else if thumbnail}
+            {#if thumbnailPath || loadFullImage}
+                <MediaLoader bind:loaded bind:hover bind:duration bind:videoElem {resolution} {type} {path} {thumbnailPath} {name} {mediaStyle} {loadFullImage} />
+            {/if}
         {:else}
             <div class="icon">
                 <Icon size={2.5} id={icon} white={type === "image"} />

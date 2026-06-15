@@ -1,5 +1,7 @@
+import { get } from "svelte/store"
 import type { TemplateStyleOverride } from "../../../types/Show"
-
+import { globalRegexes } from "../../stores"
+import { TemplateHelper } from "../../utils/templates"
 
 // split the rendered text so template rules can restyle matching chunks
 export function applyStyleOverrides(baseLines: any[], overrides: TemplateStyleOverride[]) {
@@ -23,7 +25,7 @@ export function applyStyleOverrides(baseLines: any[], overrides: TemplateStyleOv
 }
 
 function buildOverrideRegex(override: TemplateStyleOverride) {
-    const raw = (override.pattern || "").trim()
+    const raw = ((override.globalRegex ? get(globalRegexes)[override.globalRegex]?.value : override.pattern) || "").trim()
     if (!raw) return null
 
     if (raw.startsWith("/") && raw.lastIndexOf("/") > 0) {
@@ -82,11 +84,60 @@ function splitSegment(segment: any, regex: RegExp, override: TemplateStyleOverri
 }
 
 function mergeOverrideStyles(baseStyle: string, override: TemplateStyleOverride) {
-    let style = baseStyle || ""
-    if (override.color) style += `color: ${override.color};`
-    if (override.bold) style += "font-weight: 700;"
-    if (override.italic) style += "font-style: italic;"
-    if (override.underline) style += "text-decoration: underline;"
-    if (override.uppercase) style += "text-transform: uppercase;"
-    return style
+    if (!override.templateId) return baseStyle || ""
+
+    const _template = new TemplateHelper(override.templateId)
+    const templateStyle = _template.getTextStyle()
+
+    if (!templateStyle) return baseStyle || ""
+
+    // Parse both styles into objects
+    const baseProps = parseStyleString(baseStyle || "")
+    const templateProps = parseStyleString(templateStyle)
+
+    // Merge: base properties + template override properties
+    // Template properties (color, font-weight, font-style, etc.) override base
+    const merged = { ...baseProps, ...templateProps }
+
+    // IMPORTANT: Remove font-size from merged result since it will be set separately by fontSizePart
+    // This prevents duplicate font-size declarations in the final style string
+    let fontSizePercentage = (parseInt(merged["font-size"]) || 100) / 100
+    if (fontSizePercentage > 2) fontSizePercentage = 1 // likely grow to fit
+    delete merged["font-size"]
+
+    // Convert back to CSS string with !important for color and font-style to ensure they override
+    let result =
+        Object.entries(merged)
+            .map(([key, value]) => {
+                // Add !important to style overrides that might be getting overridden
+                if (key === "color" || key === "font-style" || key === "font-weight") {
+                    return `${key}:${value} !important`
+                }
+                return `${key}:${value}`
+            })
+            .join(";") + (Object.keys(merged).length ? ";" : "")
+
+    result += `font-size: calc(var(--base-font-size) * ${fontSizePercentage}) !important;`
+
+    return result
+}
+
+function parseStyleString(styleString: string): Record<string, string> {
+    const result: Record<string, string> = {}
+    if (!styleString) return result
+
+    // Split by semicolon and parse each property
+    styleString.split(";").forEach((declaration) => {
+        const colonIndex = declaration.indexOf(":")
+        if (colonIndex === -1) return
+
+        const property = declaration.slice(0, colonIndex).trim()
+        const value = declaration.slice(colonIndex + 1).trim()
+
+        if (property && value) {
+            result[property] = value
+        }
+    })
+
+    return result
 }

@@ -67,8 +67,12 @@ export const effectSections: { [key: string]: EditBoxSection } = {
             { id: "color", type: "color", value: "rgba(80, 140, 200, 0.4)", values: { label: "edit.color", allowOpacity: true } },
 
             {
-                id: "side", type: "dropdown", value: "bottom", values: {
-                    label: "edit.side", options: [
+                id: "side",
+                type: "dropdown",
+                value: "bottom",
+                values: {
+                    label: "edit.side",
+                    options: [
                         { value: "bottom", label: "screen.bottom" },
                         { value: "top", label: "screen.top" },
                         { value: "left", label: "screen.left" },
@@ -101,6 +105,12 @@ export const effectSections: { [key: string]: EditBoxSection } = {
         inputs: splitIntoRows([
             { id: "frequency", type: "number", value: 0.2, multiplier: 10, values: { label: "edit.speed", min: 1, max: 50, decimals: 1, showSlider: true, sliderValues: { max: 20 } } },
             { id: "color", type: "color", value: "#ffffff", values: { label: "edit.color", allowOpacity: true } }
+        ])
+    },
+
+    rainbow: {
+        inputs: splitIntoRows([
+            { id: "bandWidth", type: "number", value: 30, values: { label: "edit.width", min: 5, max: 200, showSlider: true, sliderValues: { min: 10, max: 100 } } }
         ])
     },
 
@@ -207,9 +217,7 @@ export const effectSections: { [key: string]: EditBoxSection } = {
     },
 
     asset: {
-        inputs: splitIntoRows([
-            { id: "size", type: "number", value: 1, multiplier: 10, values: { label: "edit.size", max: 100, decimals: 1, showSlider: true, sliderValues: { min: 0, max: 20 } } }
-        ])
+        inputs: splitIntoRows([{ id: "size", type: "number", value: 1, multiplier: 10, values: { label: "edit.size", max: 100, decimals: 1, showSlider: true, sliderValues: { min: 0, max: 20 } } }])
     },
 
     rays: {
@@ -226,7 +234,7 @@ export const effectSections: { [key: string]: EditBoxSection } = {
             { id: "speed", type: "number", value: 1, multiplier: 10, values: { label: "edit.speed", min: -500, max: 500, decimals: 1, showSlider: true, sliderValues: { min: 0, max: 200 } } }
             // phases!!!!
         ])
-    },
+    }
 
     // smoke: [
     //     { name: "count", id: "count", input: "number", slider: true, value: 10, values: { min: 1, max: 1000 } },

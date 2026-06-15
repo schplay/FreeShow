@@ -1,15 +1,15 @@
 <script lang="ts">
-    import { actions, activePage, activePopup, activeShow, activeTimers, groups, guideActive, outLocked, outputs, overlayTimers, playingAudio, playingMetronome, resized, slideTimers, special } from "../../../stores"
+    import { actions, activePage, activePopup, activeShow, activeTimers, contextActive, groups, guideActive, outLocked, outputs, overlayTimers, playingAudio, playingMetronome, resized, slideTimers, special } from "../../../stores"
     import { DEFAULT_WIDTH, isDarkTheme } from "../../../utils/common"
     import { formatSearch } from "../../../utils/search"
-    import { previewCtrlShortcuts, previewShortcuts } from "../../../utils/shortcuts"
+    import { getNormalizedKey, previewCtrlShortcuts, previewShortcuts } from "../../../utils/shortcuts"
     import { runAction } from "../../actions/actions"
     import { getSlideText } from "../../edit/scripts/textStyle"
     import Icon from "../../helpers/Icon.svelte"
     import T from "../../helpers/T.svelte"
     import { getActiveOutputs, isOutCleared, outputSlideHasContent, setOutput } from "../../helpers/output"
     import { getLayoutRef } from "../../helpers/show"
-    import { getFewestOutputLines, getItemWithMostLines, playNextGroup, updateOut } from "../../helpers/showActions"
+    import { getFewestOutputLines, getItemWithMostLines, playNextGroup, playPreviousGroup, updateOut } from "../../helpers/showActions"
     import { _show } from "../../helpers/shows"
     import { newSlideTimer } from "../../helpers/tick"
     import { getFirstOutputIdWithAudableBackground } from "../../helpers/video"
@@ -26,6 +26,7 @@
     import ClearButtons from "./ClearButtons.svelte"
     import MultiOutputs from "./MultiOutputs.svelte"
     import PreviewOutputs from "./PreviewOutputs.svelte"
+    import SpotifyController from "./SpotifyController.svelte"
 
     $: allActiveOutputs = getActiveOutputs($outputs, true, true, true)
     $: outputId = allActiveOutputs[0]
@@ -39,6 +40,7 @@
     let numberKeyTimeout: NodeJS.Timeout | null = null
     let previousNumberKey = ""
     function keydown(e: KeyboardEvent) {
+        if ($contextActive) return
         if ($guideActive || $activePopup === "assign_shortcut") return
         if ((e.ctrlKey || e.metaKey || e.altKey) && previewCtrlShortcuts[e.key]) {
             e.preventDefault()
@@ -138,14 +140,24 @@
         let showGroups = groupIds.length ? _show(currentShowId).slides(groupIds).get() : []
         if (!showGroups.length) return
 
+        // Get both the actual key and normalized key to support all keyboard layouts
+        const actualKey = e.key
+        const normalizedKey = getNormalizedKey(e)
+
         let globalGroupIds: string[] = []
         Object.entries($groups).forEach(([groupId, group]) => {
-            if (!group.shortcut || group.shortcut.toLowerCase() !== e.key.toLowerCase()) return
+            if (typeof group.shortcut !== "string") return
+
+            // Check both actual key (for native shortcuts) and normalized key (for Latin shortcuts on non-Latin keyboards)
+            const shortcutLower = group.shortcut.toLowerCase()
+            if (shortcutLower !== actualKey.toLowerCase() && shortcutLower !== normalizedKey.toLowerCase()) return
+
             showGroups.forEach((slide) => {
                 if (slide.globalGroup === groupId) globalGroupIds.push(slide.id)
             })
         })
 
+        if (e.shiftKey) return playPreviousGroup(globalGroupIds, { showRef, outSlide, currentShowId }, !e.altKey)
         return playNextGroup(globalGroupIds, { showRef, outSlide, currentShowId }, !e.altKey)
     }
 
@@ -163,13 +175,7 @@
     let autoChange = true
     $: if (outputId) autoChange = true
     $: if (autoChange && ($outputs || $overlayTimers || $activeTimers || $playingMetronome)) {
-        let active = getActiveClear(
-            !isOutCleared("transition"),
-            Object.keys($playingAudio).length || $playingMetronome,
-            !isOutCleared("overlays") || !isOutCleared("effects"),
-            !isOutCleared("slide") && (outputSlideHasContent(currentOutput) || isOutCleared("background")),
-            !isOutCleared("background")
-        )
+        let active = getActiveClear(!isOutCleared("transition"), Object.keys($playingAudio).length || $playingMetronome, !isOutCleared("overlays") || !isOutCleared("effects"), !isOutCleared("slide") && (outputSlideHasContent(currentOutput) || isOutCleared("background")), !isOutCleared("background"))
         if (active !== activeClear) activeClear = active
     }
     // enable autochange again if active has no value
@@ -289,6 +295,8 @@
                 {/if}
             {/if}
         </div>
+
+        <SpotifyController />
     {/if}
 </div>
 

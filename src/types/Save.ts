@@ -9,33 +9,7 @@ import type { StageLayouts } from "./Stage"
 
 export type SaveList = SaveListSettings | SaveListSyncedSettings | "themes" | "events" | "templates" | "overlays" | "driveKeys"
 
-export type SaveListSyncedSettings =
-    | "categories"
-    | "drawSettings"
-    | "overlayCategories"
-    | "templateCategories"
-    | "styles"
-    | "profiles"
-    | "timers"
-    | "variables"
-    | "triggers"
-    | "audioStreams"
-    | "audioPlaylists"
-    | "scriptures"
-    | "scriptureSettings"
-    | "groups"
-    | "midiIn"
-    | "emitters"
-    | "playerVideos"
-    | "videoMarkers"
-    | "mediaTags"
-    | "actionTags"
-    | "variableTags"
-    | "customizedIcons"
-    | "companion"
-    | "globalTags"
-    | "customMetadata"
-    | "effects"
+export type SaveListSyncedSettings = "categories" | "drawSettings" | "overlayCategories" | "templateCategories" | "styles" | "profiles" | "timers" | "variables" | "audioStreams" | "audioPlaylists" | "scriptures" | "scriptureSettings" | "groups" | "midiIn" | "emitters" | "playerVideos" | "videoMarkers" | "mediaTags" | "playerTags" | "actionTags" | "variableTags" | "timerTags" | "customizedIcons" | "companion" | "globalTags" | "globalRegexes" | "customMetadata" | "effects" | "deletedDefaults"
 
 export type SaveListSettings =
     | "initialized"
@@ -74,14 +48,18 @@ export type SaveListSettings =
     | "volume"
     | "gain"
     | "audioChannelsData"
+    | "cloudSyncData"
     | "driveData"
     | "calendarAddShow"
     | "metronome"
-    | "equalizerConfig"
+    | "audioEffects"
     | "eqPresets"
     | "effectsLibrary"
     | "special"
+    | "timeline"
+    | "timecode"
     | "contentProviderData"
+    | "obsData"
 
 export interface SaveData {
     // SETTINGS
@@ -89,7 +67,7 @@ export interface SaveData {
     SYNCED_SETTINGS: { [key in SaveListSyncedSettings]: any } | {}
     // SHOWS
     SHOWS: TrimmedShows
-    STAGE_SHOWS: StageLayouts
+    STAGE: StageLayouts
     // STORES
     PROJECTS: { projects: Projects; folders: Folders; projectTemplates: Projects }
     OVERLAYS: Overlays

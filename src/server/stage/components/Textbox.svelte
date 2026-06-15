@@ -1,16 +1,17 @@
 <script lang="ts">
     import { onDestroy, onMount } from "svelte"
     import type { Item } from "../../../types/Show"
-    import Clock from "../items/Clock.svelte"
-    import ListView from "./ListView.svelte"
     import Button from "../../common/components/Button.svelte"
     import Icon from "../../common/components/Icon.svelte"
-    import { getStyles } from "../../common/util/style"
-    import autosize, { type AutosizeTypes } from "../../common/util/autosize"
-    import { dictionary, updateTransposed, variables } from "../util/stores"
-    import { getDynamicValue, replaceDynamicValues } from "../helpers/show"
-    import { send } from "../util/socket"
+    import autosize from "../../common/util/autosize"
     import { createVirtualBreaks } from "../../common/util/show"
+    import { getStyles } from "../../common/util/style"
+    import { getDynamicValue, replaceDynamicValues } from "../helpers/show"
+    import Clock from "../items/Clock.svelte"
+    import { send } from "../util/socket"
+    import { dictionary, updateTransposed, variables } from "../util/stores"
+    import ListView from "./ListView.svelte"
+    import { getItemText } from "../helpers/textStyle"
 
     export let showId: string
     export let item: Item
@@ -235,13 +236,31 @@
     }
 
     // UPDATE DYNAMIC VALUES e.g. {time_} EVERY SECOND
+    // & update instantly when variables or item change
+    $: slideText = getItemText(item)
+    $: hasDynamicValues = slideText.includes("{")
+
+    // only update if text contains dynamic values
+    $: if (hasDynamicValues) startInterval()
+    else stopInterval()
+    let dynamicInterval: NodeJS.Timeout | null = null
+    function startInterval() {
+        stopInterval()
+        dynamicInterval = setInterval(update, 1000)
+    }
+    function stopInterval() {
+        if (dynamicInterval) clearInterval(dynamicInterval)
+        dynamicInterval = null
+    }
+
     let updateDynamic = 0
-    $: if ($variables) updateDynamic++
-    const dynamicInterval = setInterval(() => {
+    $: if ($variables || item) setTimeout(update)
+    function update() {
+        if (!hasDynamicValues) return
         updateDynamic++
-    }, 1000)
+    }
     onDestroy(() => {
-        clearInterval(dynamicInterval)
+        stopInterval()
         if (eventTimeout) clearTimeout(eventTimeout)
         if (blockTimeout) clearTimeout(blockTimeout)
     })
@@ -505,6 +524,7 @@
         font-family: unset;
         line-height: 1.1;
         /* -webkit-text-stroke-color: #000000;
+        paint-order: stroke fill;
         text-shadow: 2px 2px 10px #000000; */
 
         /* border-style: solid;
@@ -597,6 +617,9 @@
         overflow-wrap: break-word;
         /* line-break: after-white-space;
     -webkit-line-break: after-white-space; */
+
+        /* balanced breaking, looks much cleaner */
+        text-wrap: balance;
     }
 
     /* span {

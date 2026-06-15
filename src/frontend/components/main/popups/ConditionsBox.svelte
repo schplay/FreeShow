@@ -7,6 +7,7 @@
     import MaterialDropdown from "../../inputs/MaterialDropdown.svelte"
     import MaterialNumberInput from "../../inputs/MaterialNumberInput.svelte"
     import MaterialTextInput from "../../inputs/MaterialTextInput.svelte"
+    import { newToast } from "../../../utils/common"
 
     export let input: { [key: string]: string }
 
@@ -50,6 +51,7 @@
     const elementOptions = {
         timer: [{ value: "", label: translateText("stage.first_active_timer") }, ...convertToOptions($timers)],
         variable: getVariables(),
+        // , text.includes("{scripture") ? "scripture" : null
         dynamicValue: getDynamicIds(true).map((a) => ({ value: a, label: a }))
     }
     export function convertToOptions(object) {
@@ -71,6 +73,10 @@
 
     const dispatch = createEventDispatcher()
     function setValue(conditionId: string, e: any) {
+        if (conditionId === "value" && e.detail === "empty") {
+            newToast("Did you mean to leave as empty/blank value?")
+        }
+
         dispatch("change", { key: conditionId, value: e.detail })
     }
 </script>
@@ -88,6 +94,11 @@
 
             {#if conditionId === "element" && elementOptions[value.value]}
                 <MaterialDropdown label="tools.item" options={elementOptions[value.value]} value={input.elementId} on:change={(e) => setValue("elementId", e)} />
+
+                {#if input.element === "variable" && input.elementId?.includes("__")}
+                    <!-- 0 = active -->
+                    <MaterialNumberInput label="variables.number" value={Number(input.index ?? 0)} on:change={(e) => setValue("index", e)} />
+                {/if}
             {/if}
 
             {#if conditionId === "data"}

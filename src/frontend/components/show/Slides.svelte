@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onDestroy, onMount } from "svelte"
-    import { activeFocus, activePage, activePopup, alertMessage, cachedShowsData, categories, focusMode, lessonsLoaded, notFound, outLocked, outputs, outputSlideCache, showsCache, slidesOptions, special, templates } from "../../stores"
+    import { activeEdit, activeFocus, activePage, activePopup, alertMessage, cachedShowsData, categories, focusMode, lessonsLoaded, notFound, outLocked, outputs, outputSlideCache, showsCache, slidesOptions, special, templates } from "../../stores"
     import { hasNewerUpdate, wait } from "../../utils/common"
     import { getAccess } from "../../utils/profile"
     import { videoExtensions } from "../../values/extensions"
@@ -12,14 +12,15 @@
     import { getCachedShow } from "../helpers/show"
     import { checkActionTrigger, getFewestOutputLines, getFewestOutputLinesReveal, getItemWithMostLines, updateOut } from "../helpers/showActions"
     import { _show } from "../helpers/shows"
-    import { getClosestRecordingSlide } from "../helpers/slideRecording"
     import T from "../helpers/T.svelte"
     import MaterialButton from "../inputs/MaterialButton.svelte"
     import Loader from "../main/Loader.svelte"
+    import SkeletonSlide from "../slide/SkeletonSlide.svelte"
     import Slide from "../slide/Slide.svelte"
     import Autoscroll from "../system/Autoscroll.svelte"
     import Center from "../system/Center.svelte"
     import DropArea from "../system/DropArea.svelte"
+    import ShowHeader from "./ShowHeader.svelte"
 
     export let showId: string
     export let layout = ""
@@ -29,7 +30,11 @@
     $: activeLayout = layout || $showsCache[showId]?.settings?.activeLayout
     $: layoutSlides = currentShow ? getCachedShow(showId, activeLayout, $cachedShowsData)?.layout || [] : []
 
+    let hasMounted = false
     onMount(() => {
+        // don't double render all slides on first load because of cachedShowsData update
+        setTimeout(() => (hasMounted = true), 80)
+
         // custom fonts
         if (currentShow?.settings?.customFonts) loadCustomFonts(currentShow.settings.customFonts)
     })
@@ -56,12 +61,18 @@
         })
     }
 
+    let shouldSkipSmooth = 0
+    $: if (showId) {
+        offset = 0
+        shouldSkipSmooth++
+    }
+
     let scrollElem: HTMLElement | undefined
     let offset = -1
-    $: updateOffset({ $outputs })
+    $: setTimeout(() => updateOffset({ $outputs, showId }))
     async function updateOffset(_updater: any) {
-        if (!loaded || !scrollElem) return
-        if (await hasNewerUpdate("SHOWS_SCROLL_OFFSET", 50)) return
+        if (!scrollElem) return
+        if (await hasNewerUpdate("SHOWS_SCROLL_OFFSET", 10)) return
 
         let output = $outputs[activeOutputs[0]] || {}
         if (showId === output.out?.slide?.id && activeLayout === output.out?.slide?.layout) {
@@ -101,7 +112,7 @@
             }
 
             // get item click reveal
-            const clickRevealItems = (showSlide?.items || []).filter((a) => a.clickReveal)
+            const clickRevealItems = (showSlide?.items || []).filter((a) => a?.clickReveal)
             const isRevealed = clickRevealItems.length ? !!outSlide?.itemClickReveal : true
             let itemClickReveal = false
             if (outSlide && outSlide.id === showId && outSlide.layout === activeLayout && outSlide.index === index && clickRevealItems.length) {
@@ -110,7 +121,7 @@
             }
 
             // get lines reveal
-            const linesRevealItems = (showSlide?.items || []).filter((a) => a.lineReveal)
+            const linesRevealItems = (showSlide?.items || []).filter((a) => a?.lineReveal)
             let revealCount = outSlide?.revealCount ?? 0
             if (outSlide && outSlide.id === showId && outSlide.layout === activeLayout && outSlide.index === index && linesRevealItems.length && isRevealed) {
                 revealCount++
@@ -123,15 +134,12 @@
             setOutput("slide", { id: showId, layout: activeLayout, index, line, revealCount, itemClickReveal })
             updateOut(showId, index, slideRef, !e.altKey)
 
-            getClosestRecordingSlide({ showId, layoutId: activeLayout }, index)
-
             // force update output if index is the same as previous
             if (activeSlides[index]) refreshOut()
         })
 
-        // WIP focus mode does not auto scroll on arrow navigation when many slides (that overflow view area)
-        // always auto scroll in focus mode (if not very many slides)
-        if ($focusMode && projectIndex > -1 && index < 10) {
+        // set to active in focus mode
+        if ($focusMode) {
             activeFocus.set({ id: showId, index: projectIndex, type: "show" })
             return
         }
@@ -155,17 +163,24 @@
         } else endIndex = null
     }
 
-    // update show by its template
     $: gridMode = mode === "grid" || mode === "simple" || mode === "groups"
-    $: if (showId && gridMode && !isLessons && loaded) setTimeout(updateTemplate, 100)
+
+    // update show by its template
+    $: if (showId && loaded) setTimeout(updateTemplate, 100)
     function updateTemplate() {
         if (!loaded) return
 
-        let showTemplate = currentShow?.settings?.template || ""
-        // get category template if no show template
-        if (!showTemplate || showTemplate === "default" || !$templates[showTemplate]) showTemplate = $categories[currentShow?.category || ""]?.template || ""
+        let currentTemplate = currentShow?.settings?.template || ""
+        let createItems = false
 
-        history({ id: "TEMPLATE", save: false, newData: { id: showTemplate }, location: { page: "show" } })
+        // override with category template if any
+        const categoryTemplate = $categories[currentShow?.category || ""]?.template || ""
+        if (categoryTemplate && $templates[categoryTemplate]) {
+            currentTemplate = categoryTemplate
+            createItems = true
+        }
+
+        history({ id: "TEMPLATE", save: false, newData: { id: currentTemplate, data: { createItems } }, location: { page: "show" } })
     }
 
     $: if (showId && $special.capitalize_words) capitalizeWords()
@@ -178,11 +193,13 @@
         Object.keys(slides).forEach((slideId) => {
             let slide = slides[slideId]
 
-            slide.items.forEach((item) => {
-                if (!item.lines) return
+            slide?.items?.forEach((item) => {
+                if (!item?.lines) return
 
                 item.lines.forEach((line) => {
-                    line?.text.forEach((text) => {
+                    if (!Array.isArray(line?.text)) return
+
+                    line.text.forEach((text) => {
                         let newValue = capitalize(text.value)
                         if (text.value !== newValue) capitalized = true
                         text.value = newValue
@@ -280,7 +297,7 @@
             }
 
             // lines reveal
-            const linesRevealItems = (showSlide?.items || []).filter((a) => a.lineReveal)
+            const linesRevealItems = (showSlide?.items || []).filter((a) => a?.lineReveal)
             if (linesRevealItems.length) {
                 lineIndex = getFewestOutputLinesReveal($outputs) - 1
                 maxLines = getItemWithMostLines({ items: linesRevealItems })
@@ -303,6 +320,7 @@
         if (isLocked) return
 
         history({ id: "SLIDES" })
+        activeEdit.set({ type: "show", slide: 0, items: [] })
         activePage.set("edit")
     }
 
@@ -450,57 +468,50 @@
 
 <svelte:window on:keydown={keydown} on:keyup={keyup} on:mousedown={keyup} on:blur={blurred} />
 
-<Autoscroll class={$focusMode || isLocked ? "" : "context #shows__close"} {offset} disabled={disableAutoScroll} bind:scrollElem style="display: flex;">
-    <DropArea id="all_slides" selectChildren>
-        <DropArea id="slides" hoverTimeout={0} selectChildren>
-            {#if $showsCache[showId] === undefined}
-                <Center faded={!loading}>
-                    {#if loading}
-                        <Loader />
-                    {:else}
-                        <T id="error.no_show" />
-                    {/if}
-                </Center>
-            {:else}
-                <div class="grid" style={$focusMode ? "" : "padding-bottom: 60px;"}>
-                    {#if layoutSlides.length}
-                        {#each layoutSlides as slide, i}
-                            {#if (loaded || i < lazyLoader) && currentShow?.slides?.[slide.id] && (mode === "grid" || mode === "groups" || !slide.disabled) && (mode !== "groups" || currentShow.slides[slide.id].group !== null || activeSlides[i] !== undefined)}
-                                <Slide
-                                    {showId}
-                                    slide={currentShow.slides[slide.id]}
-                                    show={currentShow}
-                                    {layoutSlides}
-                                    layoutSlide={slide}
-                                    index={i}
-                                    color={slide.color}
-                                    output={activeSlides[i]}
-                                    active={activeSlides[i] !== undefined}
-                                    {endIndex}
-                                    list={!gridMode}
-                                    columns={$slidesOptions.columns}
-                                    icons
-                                    {altKeyPressed}
-                                    disableThumbnails={isLessons && !loaded}
-                                    centerPreview
-                                    on:click={(e) => slideClick(e, i)}
-                                />
-                            {/if}
-                        {/each}
-                    {:else}
-                        <Center absolute>
-                            <span style="opacity: 0.5;font-size: 2em;margin-bottom: 10px;"><T id="empty.slides" /></span>
+<div class="main" class:padding={!$focusMode} style="display: contents;">
+    <Autoscroll class={$focusMode || isLocked ? "" : "context #shows__close"} {offset} disabled={disableAutoScroll} {shouldSkipSmooth} bind:scrollElem style="display: flex;">
+        <DropArea id="all_slides" selectChildren>
+            <DropArea id="slides" hoverTimeout={0} selectChildren>
+                {#if !$focusMode}
+                    <ShowHeader {showId} hideOptions={!layoutSlides?.length} />
+                {/if}
 
-                            <MaterialButton disabled={isLocked} icon="add" title="tooltip.project" style="justify-content: start;padding: 8px 12px;" on:click={createSlide}>
-                                <T id="new.slide" />
-                            </MaterialButton>
-                        </Center>
-                    {/if}
-                </div>
-            {/if}
+                {#if $showsCache[showId] === undefined}
+                    <Center faded={!loading}>
+                        {#if loading}
+                            <Loader />
+                        {:else}
+                            <T id="error.no_show" />
+                        {/if}
+                    </Center>
+                {:else}
+                    <div class="grid" style={$focusMode ? "" : "padding-bottom: 60px;"}>
+                        {#if layoutSlides.length}
+                            {#each layoutSlides as slide, i}
+                                {@const currentSlide = currentShow?.slides?.[slide.id]}
+                                {#if hasMounted && (loaded || i < lazyLoader)}
+                                    {#if currentSlide && (mode === "grid" || mode === "groups" || !slide.disabled) && (mode !== "groups" || currentSlide.group !== null || activeSlides[i] !== undefined)}
+                                        <Slide {showId} slide={currentSlide} show={currentShow} {layoutSlides} layoutSlide={slide} index={i} color={slide.color} output={activeSlides[i]} active={activeSlides[i] !== undefined} {endIndex} list={!gridMode} columns={$slidesOptions.columns} icons {altKeyPressed} disableThumbnails={isLessons && !loaded} centerPreview on:click={(e) => slideClick(e, i)} />
+                                    {/if}
+                                {:else}
+                                    <SkeletonSlide slide={currentSlide} index={i} color={slide.color} columns={$slidesOptions.columns} active={activeSlides[i] !== undefined} on:click={(e) => slideClick(e, i)} />
+                                {/if}
+                            {/each}
+                        {:else}
+                            <Center absolute>
+                                <span style="opacity: 0.5;font-size: 2em;margin-bottom: 10px;"><T id="empty.slides" /></span>
+
+                                <MaterialButton variant="outlined" disabled={isLocked} icon="add" title="tooltip.project" style="justify-content: start;padding: 8px 14px;" on:click={createSlide}>
+                                    <T id="new.slide" />
+                                </MaterialButton>
+                            </Center>
+                        {/if}
+                    </div>
+                {/if}
+            </DropArea>
         </DropArea>
-    </DropArea>
-</Autoscroll>
+    </Autoscroll>
+</div>
 
 <style>
     .grid {

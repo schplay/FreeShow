@@ -52,7 +52,7 @@
     function requestData() {
         if (type === "input") {
             requestMain(Main.GET_MIDI_INPUTS, undefined, (data) => {
-                if (!data.length) return
+                if (!data?.length) return
                 inputs = data
                 if (!midi.input) midi.input = data[0]?.name
 
@@ -60,7 +60,7 @@
             })
         } else {
             requestMain(Main.GET_MIDI_OUTPUTS, undefined, (data) => {
-                if (!data.length) return
+                if (!data?.length) return
                 outputs = data
                 if (!midi.output) midi.output = data[0]?.name
 
@@ -133,18 +133,15 @@
     <MaterialNumberInput label="midi.controller" value={midi.values?.controller || 0} max={127} on:change={(e) => setValues("controller", e.detail)} />
     <MaterialNumberInput label="variables.value" value={midi.values?.value || 0} max={127} on:change={(e) => setValues("value", e.detail)} />
 {:else}
-    <MaterialNumberInput
-        label="midi.note <span style='color: var(--text);opacity: 0.5;font-weight: normal;font-size: 0.8em;margin-left: 10px;'>{midiToNote(midi.values?.note ?? 0)}</span>"
-        disabled={noActionOrDefaultValues && type !== "output" && !playSlide}
-        value={midi.values?.note || 0}
-        max={127}
-        on:change={(e) => setValues("note", e.detail)}
-    />
+    <MaterialNumberInput label="midi.note <span style='color: var(--text);opacity: 0.5;font-weight: normal;font-size: 0.8em;margin-left: 10px;'>{midiToNote(midi.values?.note ?? 0)}</span>" disabled={noActionOrDefaultValues && type !== "output" && !playSlide} value={midi.values?.note || 0} max={127} on:change={(e) => setValues("note", e.detail)} />
 
     {#if (!noActionOrDefaultValues && firstActionId?.includes("index_")) || type === "output" || type === "emitter" || playSlide}
         {#if type === "input"}
             <InputRow>
                 <p style="font-size: 0.7em;opacity: 0.8;">
+                    <!-- -1 will make the action trigger regardless of velocity, the action itself might use the velocity if index trigger -->
+                    <!-- setting to a value will require the velocity to match for the action to trigger! -->
+                    <!-- WIP maybe there's a better wording here: -->
                     <T id="midi.tip_velocity" />
                 </p>
             </InputRow>

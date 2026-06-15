@@ -1,27 +1,6 @@
 import { get } from "svelte/store"
 import type { Media } from "../../../types/Show"
-import {
-    actions,
-    actionTags,
-    activeActionTagFilter,
-    activeEdit,
-    activeMediaTagFilter,
-    activeTagFilter,
-    activeVariableTagFilter,
-    contextData,
-    drawerTabsData,
-    globalTags,
-    groups,
-    media,
-    mediaTags,
-    outputs,
-    overlays,
-    selected,
-    shows,
-    sorted,
-    variables,
-    variableTags
-} from "../../stores"
+import { actions, actionTags, activeActionTagFilter, activeEdit, activeMediaTagFilter, activePlayerTagFilter, activeTagFilter, activeVariableTagFilter, activeTimerTagFilter, contextData, drawerTabsData, globalTags, groups, media, mediaTags, outputs, overlays, playerTags, playerVideos, selected, shows, sorted, variables, variableTags, timers, timerTags } from "../../stores"
 import { translateText } from "../../utils/language"
 import { drawerTabs } from "../../values/tabs"
 import { actionData } from "../actions/actionData"
@@ -29,10 +8,11 @@ import { getActionName, getActionTriggerId } from "../actions/actions"
 import { getEditItems, getEditSlide } from "../edit/scripts/itemHelpers"
 import { getSlideText } from "../edit/scripts/textStyle"
 import { chordTypes, keys } from "../edit/values/chords"
-import { clone, keysToID, sortByName, sortObject } from "../helpers/array"
+import { clone, keysToID, sortByName } from "../helpers/array"
 import { removeExtension } from "../helpers/media"
 import { getLayoutRef } from "../helpers/show"
 import { _show } from "../helpers/shows"
+import { createTagItems, getSelectedTagIds } from "../helpers/tags"
 import type { ContextMenuItem } from "./contextMenus"
 
 const loadActions = {
@@ -49,57 +29,63 @@ const loadActions = {
 
     // TAGS
     tag_set: () => {
-        const selectedShowTags = get(shows)[get(selected).data[0]?.id]?.quickAccess?.tags || []
-        const sortedTags: (ContextMenuItem | "SEPARATOR")[] = sortObject(sortByName(keysToID(get(globalTags))), "color").map((a) => ({ ...a, label: a.name, enabled: selectedShowTags.includes(a.id), translate: false }))
-        const create = { label: "popup.manage_tags", icon: "edit", iconColor: "#97c7ff", id: "create" }
-        if (sortedTags.length) sortedTags.push("SEPARATOR")
-        sortedTags.push(create)
-        return sortedTags
+        const selectedShowTags = getSelectedTagIds<{ id?: string }>(get(selected), (item) => get(shows)[item.id || ""]?.quickAccess?.tags)
+        return createTagItems(globalTags, selectedShowTags, true)
     },
     tag_filter: () => {
-        const sortedTags = sortObject(sortByName(keysToID(get(globalTags))), "color").map((a) => ({ ...a, label: a.name, enabled: get(activeTagFilter).includes(a.id), translate: false }))
+        const sortedTags = createTagItems(globalTags, get(activeTagFilter))
         setContextData("tags", sortedTags.length)
         return sortedTags
     },
     media_tag_set: () => {
-        const selectedTags = get(media)[get(selected).data[0]?.path]?.tags || []
-        const sortedTags: (ContextMenuItem | "SEPARATOR")[] = sortObject(sortByName(keysToID(get(mediaTags))), "color").map((a) => ({ ...a, label: a.name, enabled: selectedTags.includes(a.id), translate: false }))
-        const create = { label: "popup.manage_tags", icon: "edit", iconColor: "#97c7ff", id: "create" }
-        if (sortedTags.length) sortedTags.push("SEPARATOR")
-        sortedTags.push(create)
-        return sortedTags
+        const selectedTags = getSelectedTagIds<{ path?: string }>(get(selected), (item) => get(media)[item.path || ""]?.tags)
+        return createTagItems(mediaTags, selectedTags, true)
     },
     media_tag_filter: () => {
-        const sortedTags = sortObject(sortByName(keysToID(get(mediaTags))), "color").map((a) => ({ ...a, label: a.name, enabled: get(activeMediaTagFilter).includes(a.id), translate: false }))
+        const sortedTags = createTagItems(mediaTags, get(activeMediaTagFilter))
         setContextData("media_tags", sortedTags.length)
         return sortedTags
     },
-    action_tag_set: () => {
-        const selectedTags = get(actions)[get(selected).data[0]?.id]?.tags || []
-        const sortedTags: (ContextMenuItem | "SEPARATOR")[] = sortObject(sortByName(keysToID(get(actionTags))), "color").map((a) => ({ ...a, label: a.name, enabled: selectedTags.includes(a.id), translate: false }))
-        const create = { label: "popup.manage_tags", icon: "edit", iconColor: "#97c7ff", id: "create" }
-        if (sortedTags.length) sortedTags.push("SEPARATOR")
-        sortedTags.push(create)
+    player_tag_set: () => {
+        const selectedTags = getSelectedTagIds<string | { id?: string; path?: string }>(get(selected), (item) => {
+            const itemId = typeof item === "string" ? item : item.path || item.id || ""
+            return get(playerVideos)[itemId]?.tags
+        })
+        return createTagItems(playerTags, selectedTags, true)
+    },
+    player_tag_filter: () => {
+        const sortedTags = createTagItems(playerTags, get(activePlayerTagFilter))
+        setContextData("player_tags", sortedTags.length)
         return sortedTags
     },
+    action_tag_set: () => {
+        const selectedTags = getSelectedTagIds<{ id?: string }>(get(selected), (item) => get(actions)[item.id || ""]?.tags)
+        return createTagItems(actionTags, selectedTags, true)
+    },
     action_tag_filter: () => {
-        let sortedTags = sortObject(sortByName(keysToID(get(actionTags))), "color").map((a) => ({ ...a, label: a.name, enabled: get(activeActionTagFilter).includes(a.id), translate: false }))
-        if (get(activeActionTagFilter).length) sortedTags = sortedTags.filter((a) => a.id !== get(drawerTabsData).functions?.activeSubmenu)
+        let sortedTags = createTagItems(actionTags, get(activeActionTagFilter))
+        if (get(activeActionTagFilter).length) sortedTags = sortedTags.filter((a) => typeof a === "string" || a.id !== get(drawerTabsData).functions?.activeSubmenu)
         setContextData("action_tags", sortedTags.length)
         return sortedTags
     },
     variable_tag_set: () => {
-        const selectedTags = get(variables)[get(selected).data[0]?.id]?.tags || []
-        const sortedTags: (ContextMenuItem | "SEPARATOR")[] = sortObject(sortByName(keysToID(get(variableTags))), "color").map((a) => ({ ...a, label: a.name, enabled: selectedTags.includes(a.id), translate: false }))
-        const create = { label: "popup.manage_tags", icon: "edit", iconColor: "#97c7ff", id: "create" }
-        if (sortedTags.length) sortedTags.push("SEPARATOR")
-        sortedTags.push(create)
-        return sortedTags
+        const selectedTags = getSelectedTagIds<{ id?: string }>(get(selected), (item) => get(variables)[item.id || ""]?.tags)
+        return createTagItems(variableTags, selectedTags, true)
     },
     variable_tag_filter: () => {
-        let sortedTags = sortObject(sortByName(keysToID(get(variableTags))), "color").map((a) => ({ ...a, label: a.name, enabled: get(activeVariableTagFilter).includes(a.id), translate: false }))
-        sortedTags = sortedTags.filter((a) => a.id !== get(drawerTabsData).functions?.activeSubmenu)
+        let sortedTags = createTagItems(variableTags, get(activeVariableTagFilter))
+        sortedTags = sortedTags.filter((a) => typeof a === "string" || a.id !== get(drawerTabsData).functions?.activeSubmenu)
         setContextData("variable_tags", sortedTags.length)
+        return sortedTags
+    },
+    timer_tag_set: () => {
+        const selectedTags = getSelectedTagIds<{ id?: string }>(get(selected), (item) => get(timers)[item.id || ""]?.tags)
+        return createTagItems(timerTags, selectedTags, true)
+    },
+    timer_tag_filter: () => {
+        let sortedTags = createTagItems(timerTags, get(activeTimerTagFilter))
+        sortedTags = sortedTags.filter((a) => typeof a === "string" || a.id !== get(drawerTabsData).functions?.activeSubmenu)
+        setContextData("timer_tags", sortedTags.length)
         return sortedTags
     },
 
@@ -108,8 +94,9 @@ const loadActions = {
     sort_media: (items: ContextMenuItem[]) => sortItems(items, "media"),
     slide_groups: (items: ContextMenuItem[]) => {
         const selectedIndex = get(selected).data[0]?.index
-        const slideRef = getLayoutRef()?.[selectedIndex] || {}
-        const currentSlide = _show().get("slides")[slideRef.id]
+        const ref = getLayoutRef()
+        const slideRef = ref[selectedIndex] || {}
+        const currentSlide = _show().get("slides")?.[slideRef.id]
         if (!currentSlide) return []
 
         const currentGroup: string = currentSlide.globalGroup || ""
@@ -124,8 +111,56 @@ const loadActions = {
         })
 
         if (!isParent && !items.length) return [{ label: "empty.general", disabled: true }]
-        // , icon: "remove"
-        return [...(isParent ? [{ id: "none", label: "main.none", enabled: noGroup, style: "opacity: 0.8;" }] : []), ...sortItemsByLabel(items)]
+
+        const textContent = getSlideText(currentSlide).trim()
+        const hasText = textContent.length > 0
+
+        // SUGGESTIONS
+        let suggested: ContextMenuItem[] = []
+        // Verse always (if it exists)
+        let verseIndex = items.findIndex((a) => a.id === "verse")
+        // if (verseIndex !== -1) suggested.push(items.splice(verseIndex, 1)[0]) // remove from main list
+        if (verseIndex !== -1) suggested.push(items[verseIndex])
+        if (hasText) {
+            // Chorus if text
+            let chorusIndex = items.findIndex((a) => a.id === "chorus")
+            if (chorusIndex !== -1) suggested.push(items[chorusIndex])
+        }
+        if (selectedIndex === 0) {
+            // Intro if first slide
+            let introIndex = items.findIndex((a) => a.id === "intro")
+            if (introIndex !== -1) suggested.push(items[introIndex])
+        } else if (selectedIndex === ref.length - 1) {
+            // Outro if last slide
+            let outroIndex = items.findIndex((a) => a.id === "outro")
+            if (outroIndex !== -1) suggested.push(items[outroIndex])
+        } else if (!hasText) {
+            // Break if no text (and not first/last)
+            let breakIndex = items.findIndex((a) => a.id === "break")
+            if (breakIndex !== -1) suggested.push(items[breakIndex])
+        } else if (textContent.length < 20) {
+            // Tag if short text (and not first/last)
+            let tagIndex = items.findIndex((a) => a.id === "tag")
+            if (tagIndex !== -1) suggested.push(items[tagIndex])
+        } else if (selectedIndex > 4) {
+            // Bridge if after slide 4 (and none of the above)
+            let bridgeIndex = items.findIndex((a) => a.id === "bridge")
+            if (bridgeIndex !== -1) suggested.push(items[bridgeIndex])
+        }
+
+        const parentGroup = _show().get("slides")?.[slideRef?.parent?.id || ""]?.globalGroup || ""
+        if (!isParent && parentGroup) {
+            // use parent group if it's global
+            let groupIndex = items.findIndex((a) => a.id === parentGroup)
+            if (groupIndex !== -1) {
+                // move itself to start of suggested list if it exists
+                let suggestedIndex = suggested.findIndex((a) => a.id === parentGroup)
+                if (suggestedIndex !== -1) suggested.splice(suggestedIndex, 1)[0]
+                suggested.unshift(items[groupIndex])
+            }
+        }
+
+        return [...(suggested.length ? [...suggested.map((a) => ({ ...a, icon: "autofill" })), "SEPARATOR"] : []), ...sortItemsByLabel(items), ...(isParent ? ["SEPARATOR", { id: "none", label: "main.none", enabled: noGroup, style: "opacity: 0.8;" }] : [])]
     },
     actions: () => {
         const slideRef = getLayoutRef()?.[get(selected).data[0]?.index]
@@ -139,9 +174,7 @@ const loadActions = {
             "SEPARATOR",
             { id: "nextTimer", label: "preview.nextTimer", icon: "clock", iconColor: "#fca4ff", enabled: Number(slideRef?.data?.nextTimer || 0) || false },
             { id: "loop", label: "preview.to_start", icon: "restart", iconColor: "#fca4ff", enabled: slideRef?.data?.end || false },
-            { id: "nextAfterMedia", label: "actions.next_after_media", iconColor: "#fca4ff", icon: "forward", enabled: currentActions?.nextAfterMedia || false },
-            "SEPARATOR",
-            { id: "animate", label: "popup.animate", icon: "stars", iconColor: "#fff1ad", enabled: currentActions?.animate || false }
+            { id: "nextAfterMedia", label: "actions.next_after_media", iconColor: "#fca4ff", icon: "forward", enabled: currentActions?.nextAfterMedia || false }
         ]
 
         return slideActions
@@ -158,11 +191,14 @@ const loadActions = {
         if (get(activeEdit).type !== "overlay") {
             itemActions.push({ id: "clickReveal", label: "actions.click_reveal", icon: "click_action", iconColor: "#d4a3f6", enabled: !!currentItem?.clickReveal })
             if (currentItem?.type === "text" || currentItem?.lines) itemActions.push({ id: "lineReveal", label: "actions.line_reveal", icon: "line_reveal", iconColor: "#d4a3f6", enabled: !!currentItem?.lineReveal })
+            itemActions.push("SEPARATOR")
         }
 
         itemActions.push(
             ...[
                 // { id: "transition", label: "popup.transition", icon: "transition", enabled: !!currentItemActions.transition },
+                { id: "display_duration", label: "popup.display_duration", icon: "clock", iconColor: "#d497ff", enabled: Number(currentItemActions.displayDuration || 0) || false },
+                "SEPARATOR",
                 { id: "showTimer", label: "actions.show_timer", icon: "time_in", iconColor: "#cd86ff", enabled: Number(currentItemActions.showTimer || 0) || false },
                 { id: "hideTimer", label: "actions.hide_timer", icon: "time_out", iconColor: "#cd86ff", enabled: Number(currentItemActions.hideTimer || 0) || false }
             ]
@@ -171,6 +207,8 @@ const loadActions = {
         return itemActions
     },
     remove_layers: () => {
+        if (!Array.isArray(get(selected).data) || !get(selected).data.length) return []
+
         const layoutSlides = getLayoutRef()
         const layoutSlide = layoutSlides[get(selected).data[0]?.index] || {}
 

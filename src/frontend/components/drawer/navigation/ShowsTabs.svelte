@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { TrimmedShow } from "../../../../types/Show"
-    import { categories, drawerTabsData, labelsDisabled, shows } from "../../../stores"
+    import { activeProfile, categories, drawerTabsData, labelsDisabled, shows } from "../../../stores"
     import { hasNewerUpdate } from "../../../utils/common"
     import { getAccess } from "../../../utils/profile"
     import { keysToID, sortObject } from "../../helpers/array"
@@ -10,7 +10,7 @@
     import MaterialButton from "../../inputs/MaterialButton.svelte"
     import NavigationSections from "./NavigationSections.svelte"
 
-    const profile = getAccess("shows")
+    $: profile = $activeProfile ? getAccess("shows") : {}
     $: readOnly = profile.global === "read"
 
     $: activeSubTab = $drawerTabsData.shows?.activeSubTab || ""
@@ -31,15 +31,15 @@
     // $: archivedShows = currentShows.filter((a) => a.category !== null && $categories[a.category]?.isArchive)
     $: uncategorizedShowsLength = unarchivedShows.filter((a) => a.category === null || !$categories[a.category]).length
     // $: lockedShowsLength = allVisibleShows.filter((a) => a.locked).length
-    $: songNumberShowsLength = allVisibleShows.filter((a) => a.quickAccess?.number).length
+    // $: songNumberShowsLength = allVisibleShows.filter((a) => a.quickAccess?.number).length
 
     let sections: any[] = []
     $: sections = [
         [
             { id: "all", label: "category.all", icon: "all", count: unarchivedShows.length },
-            { id: "number", label: "meta.number", icon: "number", count: songNumberShowsLength, hidden: !songNumberShowsLength },
+            // { id: "number", label: "meta.number", icon: "number", count: songNumberShowsLength, hidden: !songNumberShowsLength },
             // { id: "locked", label: "output.state_locked", icon: "locked", count: lockedShowsLength, hidden: !lockedShowsLength },
-            { id: "unlabeled", label: "category.unlabeled", icon: "noIcon", count: uncategorizedShowsLength, hidden: !uncategorizedShowsLength && activeSubTab !== "unlabeled" }
+            { id: "unlabeled", label: "category.unlabeled", icon: "noIcon", count: uncategorizedShowsLength, hidden: !uncategorizedShowsLength && activeSubTab !== "unlabeled" } // , boxedIcon: true
         ],
         [{ id: "TITLE", label: "guide_title.categories" }, ...convertToButton(unarchivedCategoriesList), ...(archivedCategoriesList.length ? [{ id: "SEPARATOR", label: "actions.archive_title" }, ...convertToButton(archivedCategoriesList)] : [])]
     ]
@@ -48,9 +48,10 @@
         return sortObject(categories, "name").map((a: any) => {
             const action = a.action
             const template = a.template
+            const metadata = a.metadata?.display
             const count = allVisibleShows.reduce((count, show) => count + (show.category === a.id ? 1 : 0), 0)
             const readOnly = profile.global === "read" || profile[a.id] === "read"
-            return { id: a.id, label: a.name, icon: a.icon, action, template, count, readOnly }
+            return { id: a.id, label: a.name, icon: a.icon, action, template, metadata, count, readOnly, customIcon: true, boxedIcon: true }
         })
     }
 

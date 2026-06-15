@@ -1,9 +1,11 @@
 <script lang="ts">
-    import { onMount } from "svelte"
+    import { onMount, tick } from "svelte"
     import { uid } from "uid"
     import type { Item, Line } from "../../../../types/Show"
     import { VIRTUAL_BREAK_CHAR } from "../../../show/slides"
-    import { activeEdit, activeShow, activeStage, activeTriggerFunction, overlays, redoHistory, refreshListBoxes, stageShows, templates } from "../../../stores"
+    import { activeEdit, activeShow, activeStage, activeTriggerFunction, overlays, redoHistory, refreshListBoxes, showsCache, stageShows, templates } from "../../../stores"
+    import { newToast } from "../../../utils/common"
+    import { getNormalizedKey, isFormattingKey } from "../../../utils/shortcuts"
     import T from "../../helpers/T.svelte"
     import { clone } from "../../helpers/array"
     import { history } from "../../helpers/history"
@@ -12,7 +14,7 @@
     import { _show } from "../../helpers/shows"
     import { getStyles } from "../../helpers/style"
     import autosize from "../scripts/autosize"
-    import { getLineText, getSelectionRange, setCaret } from "../scripts/textStyle"
+    import { getItemText, getLineText, getSelectionRange, setCaret } from "../scripts/textStyle"
     import EditboxChords from "./EditboxChords.svelte"
     import { EditboxHelper } from "./EditboxHelper"
 
@@ -20,6 +22,7 @@
     export let ref: {
         type?: "show" | "overlay" | "template" | "stage"
         showId?: string
+        origin?: string
         id: string
     }
     export let index: number
@@ -59,10 +62,11 @@
         // style hash
         let s = ""
         clone(item?.lines)?.forEach((line) => {
-            let align = (line.align || "").replaceAll(lineStyleBg, "").replaceAll(lineStyleRadius, "") + ";"
+            let align = (typeof line.align === "string" ? line.align : "").replaceAll(lineStyleBg, "").replaceAll(lineStyleRadius, "") + ";"
             s += align + lineStyleBg + lineStyleRadius // + line.chords?.map((a) => a.key)
-            console.assert(Array.isArray(line?.text), "Text is not an array!")
-            line?.text?.forEach((a) => {
+            if (!line?.text) return
+            if (!Array.isArray(line.text)) line.text = []
+            line.text.forEach((a) => {
                 s += EditboxHelper.getTextStyle(a)
             })
         })
@@ -91,7 +95,7 @@
 
     function getStyle() {
         if (!plain && $activeEdit.slide === null) return
-        let result = EditboxHelper.getStyleHtml(item, plain, currentStyle)
+        let result = EditboxHelper.getStyleHtml(item, plain, currentStyle, ref.origin === "powerpoint")
         html = result.html
         currentStyle = result.currentStyle
         previousHTML = html
@@ -109,6 +113,12 @@
         setTimeout(() => {
             setCaret(textElem, { line, pos })
         }, 10)
+    }
+
+    async function refreshStyleAndRestoreCaret(caret: { line: number; pos: number }) {
+        getStyle()
+        await tick()
+        setCaret(textElem, caret)
     }
 
     function keydown(e: KeyboardEvent) {
@@ -152,7 +162,7 @@
                 return
             }
 
-            cutInTwo({ e, sel, lines, currentIndex, textPos, start })
+            cutInTwo({ e, sel, lines: clone(lines), currentIndex, textPos, start })
         }
 
         storeCurrentCaretPos()
@@ -177,6 +187,46 @@
         delete newSlide.globalGroup
         newSlide.group = null
         newSlide.color = null
+
+        // update scripture dynamic values
+        // WIP duplicate of splitItemInTwo
+        // TODO: use "sourceDynamicKey" from text instead
+        let numbersAdded: string[] = []
+        // newSlide here is a clone of "oldSlide"
+        if (newSlide.customDynamicValues?.scripture_text) {
+            const firstLine = firstLines.flat()[0]
+            const texts = (Array.isArray(firstLine?.text) ? firstLine.text : []).filter((a) => !a.customType).map((a) => a.value)
+            showsCache.update((a) => {
+                const showId = ref.showId || $activeShow?.id || ""
+                const slide = a[showId]?.slides[ref.id]
+                if (!slide?.customDynamicValues?.scripture_text) return a
+
+                texts.forEach((t, i) => {
+                    if (!slide.customDynamicValues!.scripture_text[i]) return
+
+                    numbersAdded.push(slide.customDynamicValues!.scripture_text[i][0])
+                    ;(slide.customDynamicValues!.scripture_text[i] as [string, string])[1] = t
+                    ;(slide.customDynamicValues!.scripture1_text[i] as [string, string])[1] = t
+                })
+                return a
+            })
+        }
+        if (newSlide.customDynamicValues?.scripture_text) {
+            const secondLine = secondLines.flat()[0]
+            const texts = (Array.isArray(secondLine?.text) ? secondLine.text : []).filter((a) => !a.customType).map((a) => a.value)
+            texts.forEach((t, i) => {
+                if (!newSlide.customDynamicValues.scripture_text[i]) return
+
+                newSlide.customDynamicValues.scripture_text[i][1] = t
+                newSlide.customDynamicValues.scripture1_text[i][1] = t
+
+                let removeNumber = numbersAdded.find((a) => a === newSlide.customDynamicValues.scripture_text[i][0])
+                if (removeNumber) {
+                    newSlide.customDynamicValues.scripture_text[i][0] = "0"
+                    newSlide.customDynamicValues.scripture1_text[i][0] = "0"
+                }
+            })
+        }
 
         // add new slide
         let id = uid()
@@ -219,6 +269,7 @@
 
     let HISTORY_UPDATE_KEY = 0
     let updates = 0
+    let recentKeyboardLineMutationAt = 0
     function updateLines(newLines: Line[] = []) {
         // updateItem = true
         if (!newLines?.length) newLines = getNewLines()
@@ -229,6 +280,7 @@
             stageShows.update((a) => {
                 if (!a[$activeStage.id!]?.items?.[ref.id]) return a
                 a[$activeStage.id!].items[ref.id].lines = newLines
+                a[$activeStage.id!].modified = Date.now()
                 return a
             })
         } else if (ref.id) {
@@ -243,10 +295,13 @@
                 if (historyText === linesText) return
             }
 
+            // only reset caret when lines are added/removed, not when line content changes
             let lastChangedLine = EditboxHelper.determineCaretLine(item?.lines || [], newLines)
-            if (lastChangedLine > -1) setCaretDelayed(lastChangedLine, 0)
-
-            // create new history store, when passing 15 steps
+            const keyboardLineMutation = Date.now() - recentKeyboardLineMutationAt < 250
+            const domSelection = window.getSelection()
+            const anchorElem = (domSelection?.anchorNode as Element)?.nodeType === Node.ELEMENT_NODE ? (domSelection?.anchorNode as Element) : domSelection?.anchorNode?.parentElement
+            const editingThisTextElem = !!textElem && (document.activeElement === textElem || anchorElem?.closest(".edit") === textElem)
+            if (lastChangedLine > -1 && (item?.lines || []).length !== newLines.length && !keyboardLineMutation && !editingThisTextElem) setCaretDelayed(lastChangedLine, 0) // create new history store, when passing 15 steps
             updates++
             if (updates >= 15) {
                 HISTORY_UPDATE_KEY++
@@ -259,25 +314,45 @@
             // fix lineBg/Radius style
             if (lineStyleBg) {
                 newLines.forEach((line) => {
-                    line.align = (line.align || "").replace(lineStyleBg, "")
+                    line.align = (typeof line.align === "string" ? line.align : "").replace(lineStyleBg, "")
                 })
             }
             if (lineStyleRadius) {
                 newLines.forEach((line) => {
-                    line.align = (line.align || "").replace(lineStyleRadius, "")
+                    line.align = (typeof line.align === "string" ? line.align : "").replace(lineStyleRadius, "")
                 })
             }
 
             history({ id: "SHOW_ITEMS", newData: { key: "lines", data: clone([newLines]), slides: [ref.id], items: [index], showId: ref.showId }, location: { page: "none", override: itemRef } })
+
+            // update stored scripture custom dynamic values
+            if ($showsCache[ref.showId || ""]?.slides?.[ref.id]?.customDynamicValues) {
+                showsCache.update((a) => {
+                    if (!a[ref.showId || ""]?.slides?.[ref.id]?.customDynamicValues) return a
+                    newLines.forEach((line) => {
+                        line.text?.forEach((text) => {
+                            if (text.sourceDynamicKey?.includes("scripture_text")) {
+                                const key = text.sourceDynamicKey.split(":")[0]
+                                const index = text.sourceDynamicKey.split(":")[1] || "0"
+                                if (!a[ref.showId!].slides[ref.id].customDynamicValues![key]?.[index]?.[1]) return
+                                a[ref.showId!].slides[ref.id].customDynamicValues![key][index][1] = text.value
+                            }
+                        })
+                    })
+                    return a
+                })
+            }
 
             // refresh list view boxes
             if (plain) refreshListBoxes.set(editIndex)
         }
 
         function setNewLines(a: any) {
-            if (!a[$activeEdit.id!].items[index]) return a
+            if (!a[$activeEdit.id!]?.items?.[index]) return a
 
             a[$activeEdit.id!].items[index].lines = newLines
+
+            a[$activeEdit.id!].modified = Date.now()
             return a
         }
     }
@@ -296,7 +371,6 @@
         changedTimeout = setTimeout(() => (textChanged = false), 500)
     }
 
-    // typing
     let isTyping = false
     $: if (isAuto && textChanged) checkTyping()
     let typingTimeout: NodeJS.Timeout | null = null
@@ -313,18 +387,17 @@
 
     // update auto size
     let loaded = false
-    $: isAuto = item?.auto
-    $: textFit = item?.textFit
+    $: isAuto = item?.auto || (item?.textFit || "none") !== "none"
     $: textArray = Array.isArray(item?.lines?.[0]?.text) ? item.lines[0].text : []
     $: itemText = textArray.filter((a) => !a.customType?.includes("disableTemplate")) || []
     $: itemFontSize = Number(getStyles((ref.type === "stage" ? item : itemText[0])?.style, true)?.["font-size"] || "")
-    $: if (isAuto || textFit || itemFontSize || textChanged) getCustomAutoSize()
+    $: if (isAuto || itemFontSize || textChanged) getCustomAutoSize()
 
     let autoSize = 0
     let alignElem: HTMLElement | undefined
     let loopStop: NodeJS.Timeout | null = null
     function getCustomAutoSize() {
-        if (isTyping || !loaded || !alignElem || (!item.auto && !item.textFit)) return
+        if (isTyping || !loaded || !alignElem || !isAuto) return
 
         if (loopStop) return
         loopStop = setTimeout(() => (loopStop = null), 200)
@@ -359,8 +432,8 @@
         currentStyle = ""
         let updateHTML = false
 
-        new Array(...textElem.children).forEach((line, i) => {
-            let align: string = plain ? item.lines?.[i]?.align || "" : line.getAttribute("style") || ""
+        new Array(...textElem.children).forEach((line: any, i) => {
+            let align: string = plain ? (typeof item.lines?.[i]?.align === "string" ? (item.lines?.[i]?.align as string) : "") : line.getAttribute("style") || ""
             align = align.replaceAll(lineStyleBg, "").replaceAll(lineStyleRadius, "") + ";"
             pos++
             currentStyle += align + lineStyleBg + lineStyleRadius
@@ -370,14 +443,20 @@
 
             newLines.push(newLine)
 
-            // WIP backspace a line into a line with different styling will merge both and apply the first style to both (HTML issue)
-
             new Array(...line.childNodes).forEach((child: any, j) => {
                 if (child.nodeName === "#text") {
                     // add "floating" text to previous node (e.g. pressing backspace at the start of a line)
+                    // preserve style when merging lines with different styling (macOS issue)
                     let lastNode = newLines[pos].text.length - 1
-                    if (lastNode < 0 || !newLines[pos].text[lastNode]) return
-                    newLines[pos].text[lastNode].value += child.textContent
+                    let originalLineStyle = item.lines?.[i]?.text?.[0]?.style || ""
+                    let lastNodeStyle = lastNode >= 0 ? newLines[pos].text[lastNode]?.style || "" : ""
+
+                    // Create new segment if no previous node or styles differ
+                    if (lastNode < 0 || !newLines[pos].text[lastNode] || (originalLineStyle && originalLineStyle !== lastNodeStyle)) {
+                        newLines[pos].text.push({ style: originalLineStyle, value: child.textContent })
+                    } else {
+                        newLines[pos].text[lastNode].value += child.textContent
+                    }
 
                     updateHTML = true
                     return
@@ -393,22 +472,34 @@
                 if (lineText === "\n") lineText = ""
                 if (plain && !lineText && !style) {
                     style = item.lines?.[i - 1]?.text[0]?.style || ""
-                    newLines[pos].align = newLines[pos - 1].align || ""
+                    newLines[pos].align = newLines[pos - 1]?.align || ""
                 }
 
                 // remove custom font size
                 let customIndex = style.indexOf("--custom")
                 if (customIndex > -1) style = style.slice(0, customIndex)
 
-                newLines[pos].text.push({ style, value: lineText })
+                // GET custom values
+                let customType = child.getAttribute("data-customtype") || undefined
+                let sourceDynamicKey = child.getAttribute("data-sourcedynamickey") || undefined
+
+                const text: any = { style, value: lineText }
+                if (customType) text.customType = customType
+                if (sourceDynamicKey) text.sourceDynamicKey = sourceDynamicKey
+
+                newLines[pos].text.push(text)
 
                 currentStyle += style
 
                 // GET CHORDS
                 let storedChords = child.getAttribute("data-chords")
                 if (storedChords) {
-                    storedChords = JSON.parse(storedChords)
-                    lineChords.push(...storedChords)
+                    try {
+                        storedChords = JSON.parse(storedChords)
+                        lineChords.push(...storedChords)
+                    } catch (err) {
+                        return
+                    }
                 }
             })
 
@@ -428,25 +519,24 @@
 
         if (pasting) return newLines
 
-        if (updateHTML) {
+        const keyboardLineMutation = Date.now() - recentKeyboardLineMutationAt < 250
+
+        if (updateHTML && !keyboardLineMutation) {
             // get caret pos
             let sel = getSelectionRange()
             let lineIndex = sel.findIndex((a) => a?.start !== undefined)
             if (lineIndex >= 0) {
                 let caret = { line: lineIndex || 0, pos: sel[lineIndex]?.start || 0 }
-
-                setTimeout(() => {
-                    getStyle()
-                    // set caret position back
-                    setTimeout(() => {
-                        setCaret(textElem, caret)
-                    }, 10)
-                }, 10)
+                void refreshStyleAndRestoreCaret(caret)
             }
         }
 
         // fix removing all text in a line
         let caret: any = null
+        let liveSel = getSelectionRange()
+        let liveSelLine = liveSel.findIndex((a) => a?.start !== undefined)
+        const liveCaret = liveSelLine > -1 ? { line: liveSelLine, pos: liveSel[liveSelLine]?.start || 0 } : null
+
         let align = item.lines?.[0]?.align || ""
         let textStyle = item.lines?.[0]?.text?.[0]?.style || ""
 
@@ -456,7 +546,8 @@
         } else {
             newLines.forEach((line, i) => {
                 if (!line.text?.length) {
-                    newLines[i].text = [{ style: textStyle, value: "" }]
+                    const lineStyle = item.lines?.[i]?.text?.[0]?.style || textStyle
+                    newLines[i].text = [{ style: lineStyle, value: "" }]
                     caret = { line: i, pos: 0 }
                 }
             })
@@ -466,7 +557,9 @@
             let currentLine = sel.findIndex((a) => a?.start !== undefined)
             let deleteKey = currentLine === lastCaretPos.line
             if (!caret && (item.lines || []).length > newLines.length) {
-                if (deleteKey) {
+                if (liveCaret) {
+                    caret = liveCaret
+                } else if (deleteKey) {
                     caret = lastCaretPos
                 } else {
                     let newLine = lastCaretPos.line > -1 ? lastCaretPos.line - 1 : newLines.length - 1
@@ -476,17 +569,12 @@
             }
         }
 
+        // For keyboard line operations, prefer the live caret from the contenteditable DOM.
+        if (keyboardLineMutation && liveCaret) caret = liveCaret
+
         if (caret) {
             item.lines = newLines
-            setTimeout(() => {
-                getStyle()
-                if (newLines.length < 1) return
-
-                // set caret position back
-                setTimeout(() => {
-                    setCaret(textElem, caret)
-                }, 10)
-            }, 10)
+            if (newLines.length > 0) void refreshStyleAndRestoreCaret(caret)
 
             lastCaretPos = caret
         } else {
@@ -524,11 +612,39 @@
     }
 
     function textElemKeydown(e: KeyboardEvent) {
-        if (e.key === "v" && (e.ctrlKey || e.metaKey)) {
+        if (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") {
+            recentKeyboardLineMutationAt = Date.now()
+        }
+
+        if (e.ctrlKey || e.metaKey) {
+            // Keep rich text changes in BoxStyle handler only.
+            if (isFormattingKey(e)) e.preventDefault()
+        }
+
+        if (getNormalizedKey(e).toLowerCase() === "v" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault()
-            navigator.clipboard.readText().then((clipText: string) => {
-                paste(e, clipText)
-            })
+            navigator.clipboard
+                .readText()
+                .then((clipText: string) => {
+                    paste(e, clipText)
+                })
+                .catch((e) => {
+                    console.warn("Could not read clipboard:", e)
+                })
+        }
+
+        if (e.key === "<") {
+            // Bamini font character "<" (ஈ)
+            // https://github.com/ChurchApps/FreeShow/issues/2899
+            if (item?.lines?.some((line) => line.text?.some((text) => text.style?.toLowerCase()?.includes("bamini")))) {
+                e.preventDefault()
+                document.execCommand("insertHTML", false, "ஈ")
+                return
+            }
+
+            // HTML (will be invisible in editor)
+            // &lt; is currently read and replaced as < when editing
+            newToast("Note: < is treated as HTML")
         }
     }
 
@@ -555,6 +671,7 @@
         let newLines: any[] = []
         let pastingIndex = -1
         sel.forEach((lineSel, lineIndex) => {
+            if (!lines[lineIndex]) return
             if (lineSel.start === undefined && (!emptySelection || lineIndex < sel.length - 1)) {
                 newLines.push(lines[lineIndex])
                 return
@@ -573,7 +690,7 @@
             let linePos = 0
             let pasteOverflow = 0
             // move multi line select to one line
-            lines[lineIndex].text.forEach((text) => {
+            lines[lineIndex].text?.forEach((text) => {
                 let value = text.value
                 let newLinePos = linePos + value.length
                 if (newLinePos < lineSel.start || linePos > lineSel.end) {
@@ -640,7 +757,7 @@
 {#if item?.lines}
     <!-- TODO: remove align..... -->
     <div bind:this={alignElem} class="align" class:chords={chordsMode} class:plain style={plain ? null : item.align || null}>
-        {#if item.lines?.length < 2 && !item.lines?.[0]?.text?.[0]?.value?.length}
+        {#if item.lines?.length < 2 && !getItemText(item).length}
             <span class="placeholder">
                 <p>
                     {#if chordsMode}
@@ -660,13 +777,13 @@
             <div
                 bind:this={textElem}
                 on:mouseup={() => storeCurrentCaretPos()}
-                class="edit"
+                class="edit context {plain ? '#editbox_text' : '#edit_box__editbox_text'}"
                 class:hidden={chordsMode}
                 class:autoSize={item.auto && autoSize}
                 contenteditable
                 on:keydown={textElemKeydown}
                 bind:innerHTML={html}
-                style="{plain || !item.auto ? '' : `--auto-size: ${autoSize}px;`}{!plain ? lineStyleBox : ''}{plain ? '' : item.align ? item.align.replace('align-items', 'justify-content') : ''}"
+                style="{plain || !item.auto ? '' : `--auto-size: ${autoSize}px;`}{!plain ? lineStyleBox : ''}{plain ? '' : typeof item.align === 'string' ? item.align.replace('align-items', 'justify-content') : ''}"
                 class:height={item.lines?.length < 2 && !item.lines?.[0]?.text[0]?.value.length}
                 class:tallLines={chordsMode}
             />
@@ -738,6 +855,14 @@
     }
     .edit.hidden {
         visibility: hidden;
+    }
+
+    .edit :global(.break) {
+        /* balanced breaking, looks much cleaner */
+        text-wrap: balance;
+    }
+    .edit :global(.break.normalWrap) {
+        text-wrap: unset;
     }
 
     /* .edit.tallLines {

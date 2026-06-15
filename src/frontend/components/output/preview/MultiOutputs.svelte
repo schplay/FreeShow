@@ -1,9 +1,13 @@
 <script lang="ts">
-    import { outputs, toggleOutputEnabled } from "../../../stores"
+    import { activePage, activeStyle, audioChannelsData, outputs, selected, settingsTab, styles, templates, toggleOutputEnabled } from "../../../stores"
+    import { translateText } from "../../../utils/language"
+    import { openDrawer } from "../../edit/scripts/edit"
     import Icon from "../../helpers/Icon.svelte"
     import T from "../../helpers/T.svelte"
-    import { keysToID, sortByName, sortObject } from "../../helpers/array"
-    import { getOutputResolution } from "../../helpers/output"
+    import { clone, keysToID, sortByName, sortObject } from "../../helpers/array"
+    import { defaultLayers, getOutputResolution, startStreaming, stopStreaming } from "../../helpers/output"
+    import { bindSlidesToOutput, getLayoutRef } from "../../helpers/show"
+    import { _show } from "../../helpers/shows"
     import MaterialButton from "../../inputs/MaterialButton.svelte"
     import PreviewOutput from "./PreviewOutput.svelte"
 
@@ -17,6 +21,21 @@
     let fullscreen = false
     let fullscreenId = ""
     function toggleFullscreen(e: any) {
+        // open output style settings
+        if (e.target.closest(".icons")) {
+            if (e.target.closest(".muted")) {
+                openDrawer("audio")
+                return
+            }
+
+            const outputId = e.target.closest(".outputPreview")?.id
+            const output = $outputs[outputId]
+            activeStyle.set(output?.style || "")
+            settingsTab.set("styles")
+            activePage.set("settings")
+            return
+        }
+
         if (!e.target.closest(".multipleOutputs") || e.target.closest("button")) return
 
         if (fullscreen) {
@@ -24,8 +43,11 @@
             return
         }
 
+        const clickedOutput = e.target.closest(".previewOutput")?.id
+        if (!clickedOutput) return
+
         fullscreen = true
-        fullscreenId = e.target.closest(".previewOutput")?.id
+        fullscreenId = clickedOutput
 
         currentResolution()
     }
@@ -72,6 +94,38 @@
     //         fullscreen = false
     //     }
     // }
+
+    $: slideId = outs[0]?.out?.slide?.id || ""
+    $: isScriptureOutput = slideId === "temp" || _show(slideId).get("reference")?.type === "scripture"
+
+    // drag-and-drop: bind slide to output
+    const SLIDE_DROP_IDS = new Set(["slide"])
+    let dragOverOutputId: string | null = null
+    function isDroppable(outputId: string) {
+        return !$outputs[outputId]?.stageOutput
+    }
+    function handleDragOver(e: DragEvent, outputId: string) {
+        if (!SLIDE_DROP_IDS.has($selected.id || "") || !isDroppable(outputId)) return
+        e.preventDefault()
+        dragOverOutputId = outputId
+    }
+    function handleDragLeave(e: DragEvent, outputId: string) {
+        const related = e.relatedTarget as HTMLElement | null
+        if (related?.closest(`#${CSS.escape(outputId)}`)) return
+        if (dragOverOutputId === outputId) dragOverOutputId = null
+    }
+    function handleDrop(e: DragEvent, outputId: string) {
+        dragOverOutputId = null
+        if (!SLIDE_DROP_IDS.has($selected.id || "") || !isDroppable(outputId)) return
+        e.preventDefault()
+        e.stopPropagation()
+
+        const ref = getLayoutRef()
+        const indexes: number[] = $selected.data.map(({ index }: { index: number }) => index).filter((i: number) => i !== undefined)
+        if (!indexes.length || !ref.length) return
+
+        bindSlidesToOutput(indexes, outputId)
+    }
 </script>
 
 <!-- aspect-ratio: {resolution?.width || 1920}/{resolution?.height || 1080}; -->
@@ -95,12 +149,62 @@ aria-label={fullscreen ? "Exit fullscreen preview" : "Toggle fullscreen preview"
     {/if}
 
     {#each outs as output}
-        <div
-            id={output.id}
-            class="outputPreview output_button context #output_preview"
-            style={fullscreen ? (fullscreenId === output.id ? "display: contents;" : "opacity: 0;position: absolute;") : outs.length > 1 ? `border: 2px solid ${output?.color};width: 50%;` : "display: contents;"}
-        >
+        {@const style = $styles[output.style || ""] || {}}
+        {@const layers = Array.isArray(style.layers) ? style.layers : clone(defaultLayers)}
+        {@const styleTemplate = isScriptureOutput ? style.templateScripture : style.template}
+        {@const isMuted = $audioChannelsData[output.id]?.isMuted}
+
+        <div id={output.id} class="outputPreview output_button context #output_preview" class:drop-target={!fullscreen && dragOverOutputId === output.id} on:dragover={(e) => handleDragOver(e, output.id)} on:dragleave={(e) => handleDragLeave(e, output.id)} on:drop={(e) => handleDrop(e, output.id)} style={fullscreen ? (fullscreenId === output.id ? "display: contents;" : "opacity: 0;position: absolute;") : outs.length > 1 ? `border: 2px solid ${output?.color};width: 50%;` : "display: contents;"}>
             <PreviewOutput outputId={output.id} {disableTransitions} disabled={outs.length > 1 && !fullscreen && !output?.active} {fullscreen} />
+
+            <!-- LIVE -->
+            {#if output.webrtcData?.url}
+                <div class="live" style="{output.webrtcData?.streaming ? 'background-color: #b60707;' : ''};">
+                    <MaterialButton style="padding: 2px 3px;min-height: 0;" on:click={() => (output.webrtcData?.streaming ? stopStreaming(output.id, true) : startStreaming(output.id))} title={output.webrtcData?.streaming ? "output.stop_streaming" : "output.start_streaming"}>
+                        {translateText(output.webrtcData?.streaming ? "output.is_live" : "output.go_live")}
+                    </MaterialButton>
+                </div>
+            {/if}
+
+            <!-- icons -->
+            {#if !fullscreen && (layers.length < 3 || styleTemplate || isMuted)}
+                <div class="icons">
+                    <!-- active layers -->
+                    {#if !layers.includes("background")}
+                        <div class="icon" data-title={translateText("<b>output.disabled_layers:</b> preview.background")}>
+                            <Icon id="media_off" size={0.8} white />
+                        </div>
+                    {/if}
+                    {#if !layers.includes("slide")}
+                        <div class="icon" data-title={translateText("<b>output.disabled_layers:</b> preview.slide")}>
+                            <Icon id="shows_off" size={0.8} white />
+                        </div>
+                    {/if}
+                    {#if !layers.includes("overlays")}
+                        <div class="icon" data-title={translateText("<b>output.disabled_layers:</b> preview.overlays")}>
+                            <Icon id="overlays_off" size={0.8} white />
+                        </div>
+                    {/if}
+
+                    <!-- style template -->
+                    {#if styleTemplate && $templates[styleTemplate]}
+                        {#if layers.length < 3}<div class="divider"></div>{/if}
+
+                        <div class="icon" data-title={`<b>${translateText(`settings.override${isScriptureOutput ? "_scripture" : ""}_with_template`)}</b>:<br>${$templates[styleTemplate].name}`}>
+                            <Icon id="templates" size={0.8} white />
+                        </div>
+                    {/if}
+
+                    <!-- muted -->
+                    {#if isMuted}
+                        {#if layers.length < 3 || styleTemplate}<div class="divider"></div>{/if}
+
+                        <div class="icon muted" data-title={translateText("output.mute")}>
+                            <Icon id="muted" size={0.8} white />
+                        </div>
+                    {/if}
+                </div>
+            {/if}
         </div>
     {/each}
 </div>
@@ -163,5 +267,61 @@ aria-label={fullscreen ? "Exit fullscreen preview" : "Toggle fullscreen preview"
         display: flex;
         gap: 5px;
         justify-content: space-between;
+    }
+
+    .outputPreview {
+        position: relative;
+    }
+
+    .outputPreview.drop-target::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border: 3px solid var(--secondary);
+        border-radius: 2px;
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    /* LIVE */
+
+    .live {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+
+        font-size: 0.7em;
+    }
+
+    /* icons */
+
+    .icons {
+        position: absolute;
+        bottom: 3px;
+        left: 3px;
+
+        border-radius: 3px;
+        background-color: rgb(0 0 0 / 0.7);
+        border: 1px solid var(--primary-lighter);
+
+        display: flex;
+        padding: 1px;
+        gap: 2px;
+
+        opacity: 0.7;
+        cursor: pointer;
+    }
+
+    .icons .icon {
+        position: relative;
+
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .icons .divider {
+        width: 1px;
+        background-color: var(--primary-lighter);
     }
 </style>

@@ -1,3 +1,5 @@
+import type { Metadata } from "./Settings"
+
 export interface Categories {
     [key: string]: Category
 }
@@ -7,10 +9,13 @@ export interface Category {
     path?: string
     id?: string
     type?: "youtube" | "vimeo"
+    mediaType?: "background" | "foreground"
     url?: string
     default?: boolean
     description?: string
     isArchive?: boolean
+    tags?: string[] // currently for player videos
+    metadata?: Metadata // show category
     action?: string // trigger custom action on content presentation
     template?: string // set a custom template all shows within this category will use by default (if no other template is set)
     submenu?: { options: any[] } // open a submenu of options (tags)
@@ -28,6 +33,7 @@ export interface BibleCategories extends Category {
     collection?: {
         versions: string[]
         previewIndex?: number
+        offsets?: { [key: string]: number }
     }
 }
 

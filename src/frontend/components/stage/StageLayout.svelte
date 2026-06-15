@@ -5,12 +5,14 @@
     import { getAccess } from "../../utils/profile"
     import { send } from "../../utils/request"
     import { getSortedStageItems, shouldItemBeShown } from "../edit/scripts/itemHelpers"
+    import { centerZoom } from "../edit/scripts/zoom"
     import { clone } from "../helpers/array"
     import { history } from "../helpers/history"
     import { enableStageOutput, getStageOutputId, getStageResolution } from "../helpers/output"
     import { getStyles } from "../helpers/style"
     import T from "../helpers/T.svelte"
     import FloatingInputs from "../input/FloatingInputs.svelte"
+    import MaterialButton from "../inputs/MaterialButton.svelte"
     import MaterialZoom from "../inputs/MaterialZoom.svelte"
     import { getStyleResolution } from "../slide/getStyleResolution"
     import Zoomed from "../slide/Zoomed.svelte"
@@ -18,12 +20,12 @@
     import Snaplines from "../system/Snaplines.svelte"
     import { getSlideTextItems, stageItemToItem, updateStageShow } from "./stage"
     import Stagebox from "./Stagebox.svelte"
-    import MaterialButton from "../inputs/MaterialButton.svelte"
 
     export let outputId = ""
     export let stageId = ""
     export let preview = false
     export let edit = true
+    export let disableStagePreview = false
 
     const profile = getAccess("stage")
     $: readOnly = profile.global === "read" || profile[stageLayoutId || ""] === "read" || profile[stageLayoutId || ""] === "none"
@@ -96,23 +98,12 @@
     // ZOOM
     let scrollElem: HTMLDivElement | undefined
     let zoom = 1
+    let zoomOrigin: { x: number; y: number } | null = null
     function updateZoom(e: any) {
         zoom = e.detail
-        centerZoom()
-    }
-
-    function centerZoom() {
-        if (zoom >= 1) return
-        // allow elem to update after zooming
-
-        setTimeout(() => {
-            if (!scrollElem) return
-
-            const centerX = (scrollElem.scrollWidth - scrollElem.clientWidth) / 2
-            const centerY = (scrollElem.scrollHeight - scrollElem.clientHeight) / 2
-
-            scrollElem.scrollTo({ left: centerX, top: centerY })
-        })
+        const origin = zoomOrigin
+        zoomOrigin = null
+        centerZoom(zoom, origin, scrollElem, "")
     }
 
     $: currentOutput = $outputs[outputId] || $allOutputs[outputId] || {}
@@ -122,9 +113,10 @@
 
     // $: videoTime = $videosTime[outputId] || 0
     // { $activeTimers, $variables, $playingAudio, $playingAudioPaths, videoTime }
-    let updater = 0
+    let conditionsUpdater = 0
     const updaterInterval = setInterval(() => {
-        if (stageItems.some((a) => a.conditions)) updater++
+        if (!Array.isArray(stageItems)) return
+        if (stageItems.some((a) => a?.conditions)) conditionsUpdater++
     }, 500)
     onDestroy(() => clearInterval(updaterInterval))
 
@@ -160,8 +152,8 @@
                 {/if}
                 {#key stageLayoutId}
                     {#each stageItems as item, index}
-                        {#if (item.type || item.enabled !== false) && (edit || checkVisibility(index, updater))}
-                            <Stagebox edit={edit && !readOnly} stageLayout={edit ? null : layout} id={item.id} item={clone(item)} {ratio} {preview} bind:mouse />
+                        {#if (item.type || item.enabled !== false) && (edit || checkVisibility(index, conditionsUpdater))}
+                            <Stagebox edit={edit && !readOnly} stageLayout={edit ? null : layout} id={item.id} item={clone(item)} {ratio} {preview} {disableStagePreview} bind:mouse />
                         {/if}
                     {/each}
                 {/key}
@@ -188,7 +180,7 @@
         {/if}
 
         <FloatingInputs>
-            <MaterialZoom columns={zoom} min={0.2} max={4} defaultValue={1} addValue={0.1} on:change={updateZoom} />
+            <MaterialZoom columns={zoom} min={0.2} max={4} defaultValue={1} addValue={0.1} on:change={updateZoom} on:origin={(e) => (zoomOrigin = e.detail)} />
         </FloatingInputs>
     {/if}
 </div>

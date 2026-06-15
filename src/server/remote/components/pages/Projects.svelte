@@ -23,23 +23,22 @@
         return [...items].sort((a, b) => (a.name || "").localeCompare(b.name || ""))
     }
 
-    function buildTree(parent = "/", index = 0, path = ""): TreeItem[] {
+    // OPTIMIZED: Pass snapshots of folders/projects to avoid repeated store reads during recursion
+    function buildTree(foldersSnapshot: Record<string, any>, projectsSnapshot: any[], parent = "/", index = 0, path = ""): TreeItem[] {
         const tree: TreeItem[] = []
-        
+
         // Get folders in this parent
-        const folderEntries = Object.entries($folders || {})
-            .filter(([, folder]: [string, any]) => !folder.deleted && folder.parent === parent)
+        const folderEntries = Object.entries(foldersSnapshot)
+            .filter(([, folder]: [string, any]) => !folder.deleted && (folder.parent === parent || (parent === "/" && !foldersSnapshot[folder.parent])))
             .map(([folderId, folder]: [string, any]) => ({ ...folder, id: folderId, type: "folder" as const }))
-        
+
         // Get projects in this parent
-        const projectEntries = ($projects || [])
-            .filter((p: any) => p.parent === parent)
-            .map((p: any) => ({ ...p, type: "project" as const }))
-        
+        const projectEntries = projectsSnapshot.filter((p: any) => p.parent === parent || (parent === "/" && !foldersSnapshot[p.parent])).map((p: any) => ({ ...p, type: "project" as const }))
+
         // Sort and combine
         const sortedFolders = sortByName(folderEntries)
         const sortedProjects = sortByName(projectEntries)
-        
+
         // Add folders first
         sortedFolders.forEach((item: any) => {
             const itemPath = path + item.id + "/"
@@ -49,16 +48,14 @@
                 type: "folder",
                 parent: item.parent || "/",
                 index,
-                path: itemPath
+                path: path
             })
-            
-            // Recursively add children for opened folders
-            if ($openedFolders.includes(item.id)) {
-                const children = buildTree(item.id, index + 1, itemPath)
-                tree.push(...children)
-            }
+
+            // Pass snapshots to recursive calls instead of re-reading stores
+            const children = buildTree(foldersSnapshot, projectsSnapshot, item.id, index + 1, itemPath)
+            tree.push(...children)
         })
-        
+
         // Add projects
         sortedProjects.forEach((item: any) => {
             tree.push({
@@ -70,11 +67,12 @@
                 path: path
             })
         })
-        
+
         return tree
     }
 
-    $: tree = buildTree()
+    // Build tree with store snapshots - only rebuilds when $folders or $projects change
+    $: tree = buildTree($folders || {}, $projects || [])
 
     // Split tree into sections (root folders and their children)
     $: splittedTree = (() => {
@@ -107,7 +105,10 @@
 
     function toggleFolder(folderId: string) {
         if ($openedFolders.includes(folderId)) {
-            _set("openedFolders", $openedFolders.filter((id) => id !== folderId))
+            _set(
+                "openedFolders",
+                $openedFolders.filter((id) => id !== folderId)
+            )
         } else {
             _set("openedFolders", [...$openedFolders, folderId])
         }
@@ -150,28 +151,16 @@
                                 {@const isActive = $activeProject?.id === item.id}
                                 {@const activeProjectParent = $activeProject?.parent || "/"}
                                 {@const isActiveFolder = item.type === "folder" && item.id === activeProjectParent && activeProjectParent !== "/"}
-                                
+
                                 {#if shown}
                                     <div class="projectItem" class:indented={item.parent !== "/"} class:root={item.parent === "/"} style="margin-inline-start: {8 * item.index}px;">
                                         {#if item.type === "folder"}
-                                            <Button 
-                                                on:click={() => toggleFolder(item.id)} 
-                                                class="project-button folder"
-                                                active={isActiveFolder}
-                                                bold={false}
-                                                border
-                                            >
+                                            <Button on:click={() => toggleFolder(item.id)} class="project-button folder" active={isActiveFolder} bold={false} border>
                                                 <Icon id={isOpened ? "folderOpen" : "folder"} right />
                                                 <span>{item.name}</span>
                                             </Button>
                                         {:else}
-                                            <Button 
-                                                on:click={() => openProject(item.id)} 
-                                                class="project-button"
-                                                active={isActive}
-                                                bold={false}
-                                                border
-                                            >
+                                            <Button on:click={() => openProject(item.id)} class="project-button" active={isActive} bold={false} border>
                                                 <Icon id="project" right />
                                                 <span>{item.name}</span>
                                             </Button>
@@ -255,7 +244,7 @@
         flex-direction: column;
         gap: 5px;
         margin: 10px 0;
-        margin-right: 5px;
+        padding-right: 5px;
     }
 
     .rootFolder {
@@ -266,6 +255,8 @@
         border-top-left-radius: 0;
         border-bottom-left-radius: 0;
         overflow: hidden;
+        width: 100%;
+        max-width: 520px;
     }
 
     .title {
@@ -319,17 +310,24 @@
     /* Active state - purple accent bar */
     .projectItem :global(button.active) {
         background-color: rgb(255 255 255 / 0.08) !important;
-        border-left: 3px solid var(--secondary) !important;
+        box-shadow: inset 4px 0 0 var(--secondary) !important;
         border-top: none !important;
         border-right: none !important;
         border-bottom: none !important;
         outline: none !important;
-        padding-left: calc(0.65rem - 3px) !important;
         box-sizing: border-box !important;
     }
 
     .projectItem.root :global(button.active) {
         background-color: transparent !important;
+    }
+
+    .rootFolder .projectItem:last-child :global(button.active) {
+        border-bottom-right-radius: 12px !important;
+    }
+
+    .rootFolder .projectItem:first-child :global(button.active) {
+        border-top-right-radius: 12px !important;
     }
 
     .projectItem :global(button.folder) {
@@ -397,7 +395,7 @@
 
         .fullTree {
             margin: 10px 0;
-            margin-right: 12px;
+            padding-right: 12px;
         }
 
         .rootFolder {
@@ -412,8 +410,8 @@
             font-size: 1.05em;
         }
 
-        .projectItem :global(button.active) {
-            padding-left: calc(0.75rem - 3px);
+        .projectItem :global(button) {
+            border-bottom-left-radius: 0 !important;
         }
 
         .projectItem :global(button) :global(svg) {

@@ -23,7 +23,7 @@
     let totalScreensHeight = 0
 
     onMount(async () => {
-        const displays = await requestMain(Main.GET_DISPLAYS)
+        const displays = (await requestMain(Main.GET_DISPLAYS)) || []
         let sortedScreens = displays.sort(sortScreensByPosition)
         screens = sortedScreens.sort(internalFirst)
 
@@ -54,27 +54,6 @@
             }
         })
     })
-
-    // const fakeScreen0 = {
-    //     bounds: { x: -864 - 1536, y: -452, width: 1536, height: 1536 },
-    //     id: 2528732444,
-    //     internal: false,
-    // }
-    // const fakeScreen = {
-    //     bounds: { x: -864, y: -452, width: 864, height: 1536 },
-    //     id: 2528732444,
-    //     internal: false,
-    // }
-    // const fakeScreen2 = {
-    //     bounds: { x: 1920 + 1536, y: 0, width: 1536, height: 1536 },
-    //     id: 2528732444,
-    //     internal: false,
-    // }
-    // const fakeScreen3 = {
-    //     bounds: { x: 1920 + 1536 + 1536, y: 0, width: 1536, height: 1536 },
-    //     id: 2528732444,
-    //     internal: false,
-    // }
 
     function internalFirst(a, b) {
         return b.internal - a.internal
@@ -109,21 +88,10 @@
             {/each}
 
             {#each outputWindows as currentScreen}
-                <div
-                    style="opacity: 0.8;position: absolute;width: {currentScreen.bounds?.width}px;height: {currentScreen.bounds?.height}px;inset-inline-start: {currentScreen.bounds?.x - (minPosX ? minPosX : 0)}px;top: {currentScreen.bounds?.y -
-                        (minPosY ? minPosY : 0)}px;"
-                >
+                <div style="opacity: 0.8;position: absolute;width: {currentScreen.bounds?.width}px;height: {currentScreen.bounds?.height}px;inset-inline-start: {currentScreen.bounds?.x - (minPosX ? minPosX : 0)}px;top: {currentScreen.bounds?.y - (minPosY ? minPosY : 0)}px;">
                     <span style="z-index: 2;position: absolute;top: 50%;left: 50%;transform: translate(-50%, -50%);font-size: 0.5em;pointer-events: none;">{currentScreen.name}</span>
                     <!-- Current screen position -->
-                    <div
-                        data-title={translateText(`main.open: <b>${currentScreen.name}</b>`)}
-                        class="screen"
-                        style="width: 100%;height: 100%;{currentScreen.screen && screens.find((a) => a.id.toString() === currentScreen.screen) ? 'opacity: 1;' : ''}"
-                        on:click={() => openOutput(currentScreen.id)}
-                        role="button"
-                        tabindex="0"
-                        on:keydown={triggerClickOnEnterSpace}
-                    ></div>
+                    <div data-title={translateText(`main.open: <b>${currentScreen.name}</b>`)} class="screen" style="width: 100%;height: 100%;{currentScreen.screen && screens.find((a) => a.id.toString() === currentScreen.screen) ? 'opacity: 1;' : ''}" on:click={() => openOutput(currentScreen.id)} role="button" tabindex="0" on:keydown={triggerClickOnEnterSpace}></div>
                 </div>
             {/each}
         </div>
@@ -144,6 +112,7 @@
         display: flex;
         /* justify-content: center; */
         /* transform: translateX(-20%); */
+        overflow: auto;
 
         min-height: 200px;
     }

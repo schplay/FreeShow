@@ -12,12 +12,16 @@ type AudioPlaylistOptions = {
 type PlaylistData = {
     crossfade?: number
     loop?: boolean
+    autoNext?: boolean
 }
 
 export class AudioPlaylist {
-    static start(playlistId: string, audioPath = "", options: AudioPlaylistOptions = {}) {
+    static start(playlistId: string, audioPath = "", index: number = 0, options: AudioPlaylistOptions = {}) {
         const playlist = get(audioPlaylists)[playlistId]
         if (!playlist) return
+
+        // don't restart if already playing
+        if (!options.pauseIfPlaying && get(activePlaylist)?.id === playlistId) return
 
         // pause if already playing
         if (options.pauseIfPlaying && audioPath && get(activePlaylist)?.id === playlistId && get(playingAudio)[audioPath]) {
@@ -25,10 +29,10 @@ export class AudioPlaylist {
             return
         }
 
-        activePlaylist.set({ id: playlistId })
+        activePlaylist.set({ id: playlistId, index })
 
         const crossfade = Number(playlist.crossfade) || 0
-        AudioPlaylist.nextInternal(audioPath, { crossfade })
+        AudioPlaylist.nextInternal(audioPath, index, { crossfade })
     }
 
     static stop() {
@@ -48,12 +52,12 @@ export class AudioPlaylist {
         if (key === "volume") AudioPlayer.updateVolume()
     }
 
-    static next() {
+    static next(isEnding: boolean = false) {
         const playlist = AudioPlaylist.getActivePlaylist()
         if (get(outLocked) || !playlist) return
 
         const crossfade = Number(playlist.crossfade) || 0
-        AudioPlaylist.nextInternal("", { crossfade, loop: playlist.loop !== false })
+        AudioPlaylist.nextInternal("", -1, { crossfade, loop: playlist.loop !== false, autoNext: isEnding ? playlist.autoNext !== false : true })
     }
 
     static getPlayingPath(): string {
@@ -98,11 +102,11 @@ export class AudioPlaylist {
         const reachedEnding = playing.currentTime + customCrossfade + this.extraMargin >= endTime
         if (!reachedEnding) return 0
 
-        AudioPlaylist.nextInternal("", { crossfade: customCrossfade, loop: playlist.loop !== false })
+        AudioPlaylist.nextInternal("", -1, { crossfade: customCrossfade, loop: playlist.loop !== false })
         return crossfade
     }
 
-    protected static nextInternal(audioPath = "", data: PlaylistData) {
+    protected static nextInternal(audioPath = "", startIndex = -1, data: PlaylistData) {
         const playlist = clone(AudioPlaylist.getActivePlaylist())
         if (!playlist) return
 
@@ -117,7 +121,7 @@ export class AudioPlaylist {
         if (!nextSong) {
             if (!data.loop && !audioIsFading()) {
                 if (data.crossfade) fadeOutAudio(data.crossfade)
-                else clearAudio("", { playlistCrossfade: true })
+                else clearAudio("", { playlistCrossfade: true, clearPlaylist: true })
 
                 setTimeout(() => {
                     if (!get(playingAudio)[previousPath]) customActionActivation("audio_playlist_ended")
@@ -129,13 +133,18 @@ export class AudioPlaylist {
         // prevent playing the same song twice (while it's fading) to stop duplicate audio
         if (Object.keys(playingAudio).includes(nextSong)) return
 
+        let nextIndex = startIndex > -1 ? startIndex : (get(activePlaylist)?.index ?? -1) + 1
+        if (playlist.songs[nextIndex] !== nextSong) nextIndex = songs.findIndex((a) => a === nextSong)
+
         activePlaylist.update((a) => {
+            if (!a) a = {}
             a.active = nextSong
+            a.index = nextIndex
             return a
         })
 
         // if (crossfade) isCrossfading = true
-        AudioPlayer.start(nextSong, { name: "" }, { pauseIfPlaying: false, crossfade: data.crossfade, playlistCrossfade: true, volume: playlist.volume || 1 })
+        AudioPlayer.start(nextSong, { name: "" }, { pauseIfPlaying: false, crossfade: data.crossfade, playlistCrossfade: true, startPaused: data.autoNext === false, volume: playlist.volume || 1 })
 
         function getSongs(): string[] {
             if (previousPath && get(activePlaylist)?.songs) return get(activePlaylist).songs
@@ -148,6 +157,7 @@ export class AudioPlaylist {
             if (mode === "shuffle") songsList = shuffleArray(songsList)
 
             activePlaylist.update((a) => {
+                if (!a) a = {}
                 a.songs = songsList
                 return a
             })

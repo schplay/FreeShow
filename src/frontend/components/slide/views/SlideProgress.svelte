@@ -1,17 +1,21 @@
 <script lang="ts">
-    import { allOutputs, groups, outputs, showsCache } from "../../../stores"
-    import { translateText } from "../../../utils/language"
-    import { getActiveOutputs } from "../../helpers/output"
-    import { getGroupName, getLayoutRef } from "../../helpers/show"
     import type { LayoutRef, Show, ShowGroups, Slide } from "../../../../types/Show"
+    import { activeProject, activeShow, allOutputs, groups, outputs, projects, showsCache } from "../../../stores"
+    import { translateText } from "../../../utils/language"
+    import { getFirstActiveOutput } from "../../helpers/output"
+    import type { ProjectProgressItem } from "../../helpers/projectProgress"
+    import { getCurrentProjectIndexes, getProjectItemLabel, getProjectItems } from "../../helpers/projectProgress"
+    import { getGroupName, getLayoutRef } from "../../helpers/show"
 
     export let tracker: any
     export let outputId = ""
     export let item: any = {}
     export let autoSize = 0
 
-    let type: "number" | "bar" | "group" = "number"
+    let type: "number" | "bar" | "group" | "project" = "number"
     $: type = tracker.type || "number"
+    let projectMetadata = "name"
+    $: projectMetadata = tracker.projectMetadata || "name"
     let accent: string | undefined
     $: accent = tracker.accent
 
@@ -43,10 +47,12 @@
     let currentShowSlides: Record<string, Slide | undefined> = {}
     let currentGroups: ShowGroups = {}
     let layoutGroups: LayoutGroupInfo[] = []
+    let projectItems: ProjectProgressItem[] = []
+    let currentProjectIndexes: number[] = []
     let slidesLength = 0
     let progressData: ProgressEntry = { layoutGroups: [], slidesLength: 0, layoutSeed: "", groupSeed: "", trackerKey: "" }
 
-    $: if (!outputId) outputId = getActiveOutputs()[0]
+    $: if (!outputId) outputId = getFirstActiveOutput()?.id || ""
     $: currentOutput = $outputs[outputId] || $allOutputs[outputId] || {}
     $: currentSlideOut = currentOutput?.out?.slide || null
     $: currentShowId = currentSlideOut?.id || ""
@@ -57,6 +63,8 @@
     $: currentGroups = $groups
     $: progressData = getProgress(currentShowId, currentShow, currentLayoutRef, currentShowSlides, currentGroups, tracker)
     $: layoutGroups = progressData.layoutGroups
+    $: projectItems = getProjectItems($projects[$activeProject || ""]?.shows || [], $showsCache)
+    $: currentProjectIndexes = getCurrentProjectIndexes($projects[$activeProject || ""]?.shows || [], currentOutput?.out || {}, typeof $activeShow?.index === "number" ? $activeShow.index : -1)
     $: slidesLength = progressData.slidesLength
 
     let progressElem: HTMLElement | undefined
@@ -102,14 +110,7 @@
         return ref
     }
 
-    function getProgress(
-        showId: string,
-        show: Show | null,
-        layoutRef: LayoutRef[],
-        slides: { [key: string]: Slide | undefined },
-        groupsStore: ShowGroups,
-        trackerData: any
-    ): ProgressEntry {
+    function getProgress(showId: string, show: Show | null, layoutRef: LayoutRef[], slides: { [key: string]: Slide | undefined }, groupsStore: ShowGroups, trackerData: any): ProgressEntry {
         if (!showId || !show || !layoutRef.length) return { layoutGroups: [], slidesLength: 0, layoutSeed: "", groupSeed: "", trackerKey: "" }
 
         const layoutSeed = getLayoutSeed(show)
@@ -124,7 +125,7 @@
             if (ref.type === "parent" && Array.isArray(ref.children)) parentChildrenMap.set(ref.id, ref.children)
         })
 
-    const showData = { show: show as Show, showId }
+        const showData = { show: show as Show, showId }
         const layoutGroups: LayoutGroupInfo[] = layoutRef.map((entry) => {
             const ref = entry.parent || entry
             const slide = slides[ref.id]
@@ -189,6 +190,16 @@
                 {/if}
             {/each}
         </div>
+    {:else if type === "project"}
+        <!-- project sequence -->
+        <div class="align groups projectGroups autoFontSize" style={autoSize ? "font-size: " + autoSize + "px;" : ""}>
+            {#each projectItems as projectItem}
+                {@const label = getProjectItemLabel(projectItem, projectMetadata)}
+                <div class="group projectItem" class:active={currentProjectIndexes.includes(projectItem.index)}>
+                    {label || "\u00A0"}
+                </div>
+            {/each}
+        </div>
     {/if}
 </div>
 
@@ -239,5 +250,22 @@
     }
     .group.active {
         color: var(--accent);
+    }
+
+    .projectGroups.align {
+        align-items: var(--text-align);
+        justify-content: center;
+    }
+    .projectGroups {
+        flex-direction: column;
+        flex-wrap: nowrap;
+        gap: 0;
+        white-space: pre-wrap;
+        text-align: var(--text-align);
+    }
+
+    .projectItem {
+        display: block;
+        min-height: 1em;
     }
 </style>

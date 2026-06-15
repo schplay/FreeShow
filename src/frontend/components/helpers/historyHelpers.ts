@@ -2,40 +2,7 @@ import { get } from "svelte/store"
 import { uid } from "uid"
 import { REMOTE } from "../../../types/Channels"
 import { ShowObj } from "../../classes/Show"
-import {
-    activeDrawerTab,
-    activeEdit,
-    activeProject,
-    activeRename,
-    activeShow,
-    activeStage,
-    activeTagFilter,
-    audioPlaylists,
-    currentOutputSettings,
-    dictionary,
-    drawerTabsData,
-    effects,
-    events,
-    focusMode,
-    folders,
-    globalTags,
-    groups,
-    notFound,
-    openedFolders,
-    overlays,
-    playerVideos,
-    profiles,
-    projects,
-    projectTemplates,
-    projectView,
-    shows,
-    showsCache,
-    special,
-    stageShows,
-    styles,
-    theme,
-    themes
-} from "../../stores"
+import { actions, activeDrawerTab, activeEdit, activeProject, activeRename, activeShow, activeStage, activeTagFilter, audioPlaylists, currentOutputSettings, dictionary, drawerTabsData, effects, events, focusMode, folders, globalTags, groups, notFound, openedFolders, overlays, playerVideos, profiles, projects, projectTemplates, projectView, shows, showsCache, special, stageShows, styles, theme, themes } from "../../stores"
 import { translateText } from "../../utils/language"
 import { updateThemeValues } from "../../utils/updateSettings"
 import { EMPTY_CATEGORY, EMPTY_EFFECT, EMPTY_EVENT, EMPTY_LAYOUT, EMPTY_PLAYER_VIDEO, EMPTY_PROJECT, EMPTY_PROJECT_FOLDER, EMPTY_SECTION, EMPTY_SLIDE, EMPTY_STAGE, EMPTY_TAG } from "../../values/empty"
@@ -97,7 +64,6 @@ export const _updaters = {
     project: {
         store: projects,
         empty: EMPTY_PROJECT,
-        cloudCombine: true,
         initialize: (data) => {
             return replaceEmptyValues(data, { name: getProjectName(), created: Date.now(), modified: Date.now(), used: Date.now() })
         },
@@ -124,7 +90,7 @@ export const _updaters = {
                 return a
             })
 
-            if (!initializing || data.shows?.length) return
+            if (!initializing || data.shows?.length || !get(projectView)) return
 
             activeRename.set("project_" + id)
         },
@@ -138,7 +104,6 @@ export const _updaters = {
     project_folder: {
         store: folders,
         empty: EMPTY_PROJECT_FOLDER,
-        cloudCombine: true,
         initialize: (data) => {
             return replaceEmptyValues(data, { created: Date.now(), modified: Date.now() })
         },
@@ -168,6 +133,7 @@ export const _updaters = {
             function addBackParents(items: any, type: "project" | "folder") {
                 changed[type]?.forEach((a: any) => {
                     items[a.id].parent = a.parent
+                    items[a.id].modified = Date.now()
                 })
                 return items
             }
@@ -198,6 +164,7 @@ export const _updaters = {
                         const key = Object.keys(items)[found]
                         parents[type].push({ id: key, parent: items[key].parent })
                         items[key].parent = parentId
+                        items[key].modified = Date.now()
                     }
                     found = Object.values(items).findIndex((a: any) => a.parent === id)
                 } while (found > -1)
@@ -206,16 +173,33 @@ export const _updaters = {
             }
         }
     },
-    project_template: {
+    project_template: { store: projectTemplates, empty: EMPTY_PROJECT, timestamp: true },
+    section_template: {
         store: projectTemplates,
-        cloudCombine: true,
-        empty: EMPTY_PROJECT
-    },
+        empty: EMPTY_SECTION,
+        initialize: (data) => {
+            return replaceEmptyValues(data, { id: uid(5) })
+        },
+        select: (_id: string, data: any) => {
+            activeShow.set({ id: data.data.id, index: data.index, type: "section" })
 
-    project_key: {
-        store: projects,
+            // focus on section title input
+            setTimeout(() => {
+                document.getElementById("sectionTitle")?.querySelector("input")?.focus()
+            }, 10)
+        },
         timestamp: true
     },
+    project_show_placeholder: {
+        store: projectTemplates,
+        empty: { id: "", type: "show_placeholder", name: "—" },
+        initialize: (data) => {
+            return replaceEmptyValues(data, { id: uid(5) }) // name: translateText("formats.show")
+        },
+        timestamp: true
+    },
+
+    project_key: { store: projects, timestamp: true },
     project_folder_key: { store: folders, timestamp: true },
 
     project_ref: { store: projects, timestamp: true },
@@ -240,7 +224,8 @@ export const _updaters = {
             setTimeout(() => {
                 document.getElementById("sectionTitle")?.querySelector("input")?.focus()
             }, 10)
-        }
+        },
+        timestamp: true
     },
 
     category_shows: {
@@ -301,12 +286,14 @@ export const _updaters = {
 
             return data
         },
-        deselect: (id: string) => clearOverlayOutput(id)
+        deselect: (id: string) => clearOverlayOutput(id),
+        timestamp: true
     },
-    overlay_items: { store: overlays, empty: [] },
-    overlay_name: { store: overlays, empty: "" },
-    overlay_color: { store: overlays, empty: null },
-    overlay_category: { store: overlays, empty: null },
+    overlay_items: { store: overlays, empty: [], timestamp: true },
+    overlay_name: { store: overlays, empty: "", timestamp: true },
+    overlay_color: { store: overlays, empty: null, timestamp: true },
+    overlay_category: { store: overlays, empty: null, timestamp: true },
+    overlay_key: { store: overlays, empty: {}, timestamp: true },
 
     template: {
         store: templates,
@@ -320,13 +307,14 @@ export const _updaters = {
             activeRename.set("template_" + id)
 
             return data
-        }
+        },
+        timestamp: true
     },
-    template_items: { store: templates, empty: [] },
-    template_name: { store: templates, empty: "" },
-    template_color: { store: templates, empty: null },
-    template_category: { store: templates, empty: null },
-    template_settings: { store: templates, empty: {} },
+    template_items: { store: templates, empty: [], timestamp: true },
+    template_name: { store: templates, empty: "", timestamp: true },
+    template_color: { store: templates, empty: null, timestamp: true },
+    template_category: { store: templates, empty: null, timestamp: true },
+    template_settings: { store: templates, empty: {}, timestamp: true },
 
     player_video: { store: playerVideos, empty: EMPTY_PLAYER_VIDEO },
 
@@ -342,13 +330,13 @@ export const _updaters = {
         }
     },
 
-    stage_item_style: { store: stageShows, empty: "" },
-    stage_item_position: { store: stageShows, empty: "" },
-    stage_item_content: { store: stageShows, empty: "" },
+    stage_item_style: { store: stageShows, empty: "", timestamp: true },
+    stage_item_position: { store: stageShows, empty: "", timestamp: true },
+    stage_item_content: { store: stageShows, empty: "", timestamp: true },
 
     show: {
         store: showsCache,
-        empty: new ShowObj(),
+        empty: new ShowObj(), // this should not be used (it's not updated)
         initialize: (data: any) => {
             const replacer: any = {}
 
@@ -367,6 +355,8 @@ export const _updaters = {
             // update remote project shows data, so the new show is properly added
             setTimeout(() => window.api.send(REMOTE, { channel: "SHOWS", data: get(shows) }))
 
+            if (!data.timestamps) data.timestamps = {}
+            data.timestamps.modified = Date.now()
             return replaceEmptyValues(data, replacer)
         },
         select: (id: string, data: any) => {
@@ -375,12 +365,20 @@ export const _updaters = {
             if (data.remember?.project && get(projects)[data.remember.project]?.shows) {
                 projects.update((p) => {
                     if (data.remember.index !== undefined && p[data.remember.project].shows.length > data.remember.index) {
-                        p[data.remember.project].shows = addToPos(p[data.remember.project].shows, [{ id }], data.remember.index)
-                        showRef.index = data.remember.index
+                        if (data.remember.replacePlaceholder) {
+                            p[data.remember.project].shows[data.remember.index] = { id }
+                            showRef.index = data.remember.index
+                        } else {
+                            p[data.remember.project].shows = addToPos(p[data.remember.project].shows, [{ id }], data.remember.index)
+                            showRef.index = data.remember.index
+                        }
                     } else {
                         p[data.remember.project].shows.push({ id })
                         showRef.index = p[data.remember.project].shows.length - 1
                     }
+
+                    // update project modified so changes work with cloud sync
+                    p[data.remember.project].modified = Date.now()
 
                     return p
                 })
@@ -445,6 +443,11 @@ export const _updaters = {
     show_layout: {
         store: showsCache,
         empty: EMPTY_LAYOUT,
+        initialize: (data) => {
+            if (!data.timestamps) data.timestamps = {}
+            data.timestamps.modified = Date.now()
+            return data
+        },
         select: (id: string, { subkey }: any, initializing: boolean) => {
             _show(id).set({ key: "settings.activeLayout", value: subkey })
 
@@ -452,7 +455,7 @@ export const _updaters = {
             if (get(activeShow)?.index !== undefined && get(activeProject) && get(projects)[get(activeProject)!]?.shows?.[get(activeShow)!.index!]) {
                 projects.update((a) => {
                     a[get(activeProject)!].shows[get(activeShow)!.index!].layout = subkey
-                    a[get(activeProject)!].shows[get(activeShow)!.index!].layoutInfo = { name: _show(id).get("layouts")[subkey]?.name || "" }
+                    a[get(activeProject)!].shows[get(activeShow)!.index!].layoutInfo = { name: _show(id).get("layouts")?.[subkey]?.name || "" }
                     return a
                 })
             }
@@ -468,7 +471,16 @@ export const _updaters = {
         }
     },
 
-    show_key: { store: showsCache },
+    show_key: {
+        store: showsCache,
+        initialize: (data) => {
+            if (typeof data !== "object") return data
+
+            if (!data.timestamps) data.timestamps = {}
+            data.timestamps.modified = Date.now()
+            return data
+        }
+    },
 
     global_group: { store: groups },
 
@@ -568,12 +580,16 @@ export const _updaters = {
             if (!initializing || data.key) return
             activeRename.set("profile_" + id)
         }
+    },
+    action: {
+        store: actions,
+        empty: { name: "", triggers: [] }
     }
 }
 
 function updateTransparentColors(id: string) {
     themes.update((a) => {
-        Object.entries(a[id].colors).forEach(([subId, color]: any) => {
+        Object.entries(a[id]?.colors || {}).forEach(([subId, color]: any) => {
             if (!converts[subId]) return
             const transparentColors: any[] = converts[subId]
 
@@ -604,10 +620,10 @@ function hexToRgb(hex: string) {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
     return result
         ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        }
+              r: parseInt(result[1], 16),
+              g: parseInt(result[2], 16),
+              b: parseInt(result[3], 16)
+          }
         : null
 }
 
@@ -619,6 +635,18 @@ function replaceEmptyValues(object: any, replacer: any) {
     return object
 }
 
+function getNextWeekdayDate(currentDate: Date, targetWeekday: number): Date {
+    let daysToAdd = targetWeekday - currentDate.getDay()
+    const result = new Date(currentDate)
+
+    // return today if it's the same day
+    if (daysToAdd === 0) return result
+
+    if (daysToAdd < 0) daysToAdd += 7
+    result.setDate(result.getDate() + daysToAdd)
+    return result
+}
+
 export const projectReplacers = [
     { id: "DD", title: translateText("calendar.day"), value: (date) => addZero(date.getDate()) },
     { id: "MM", title: translateText("calendar.month"), value: (date) => addZero(date.getMonth() + 1) },
@@ -628,13 +656,56 @@ export const projectReplacers = [
     { id: "mm", title: "Minutes", value: (date) => date.getMinutes() },
     { id: "weeknum", title: "Week number", value: (date) => getWeekNumber(date) },
     { id: "weekday", title: "Weekday", value: (date) => getWeekday(date.getDay(), get(dictionary), true) },
-    { id: "monthname", title: "Name of month", value: (date) => getMonthName(date.getMonth(), get(dictionary), true) }
-]
-export const DEFAULT_PROJECT_NAME = "{DD}.{MM}.{YY}"
-export function getProjectName(updater = get(special)) {
-    let name = updater.default_project_name ?? DEFAULT_PROJECT_NAME
+    { id: "monthname", title: "Name of month", value: (date) => getMonthName(date.getMonth(), get(dictionary), true) },
 
-    const date = new Date()
+    { id: "D0", title: "Next Sunday", value: (date) => addZero(getNextWeekdayDate(date, 0).getDate()) },
+    { id: "D1", title: "Next Monday", value: (date) => addZero(getNextWeekdayDate(date, 1).getDate()) },
+    { id: "D2", title: "Next Tuesday", value: (date) => addZero(getNextWeekdayDate(date, 2).getDate()) },
+    { id: "D3", title: "Next Wednesday", value: (date) => addZero(getNextWeekdayDate(date, 3).getDate()) },
+    { id: "D4", title: "Next Thursday", value: (date) => addZero(getNextWeekdayDate(date, 4).getDate()) },
+    { id: "D5", title: "Next Friday", value: (date) => addZero(getNextWeekdayDate(date, 5).getDate()) },
+    { id: "D6", title: "Next Saturday", value: (date) => addZero(getNextWeekdayDate(date, 6).getDate()) },
+    { id: "D7", title: "Next Sunday", value: (date) => addZero(getNextWeekdayDate(date, 0).getDate()) }
+]
+const DEFAULT_PROJECT_NAME = "{DD}.{MM}.{YY}"
+export function getDefaultProjectName() {
+    try {
+        const locale = navigator.language
+        const formatter = new Intl.DateTimeFormat(locale)
+        const parts = formatter.formatToParts()
+
+        const format = parts.reduce((acc, part) => {
+            switch (part.type) {
+                case "day":
+                    return acc + "{DD}"
+                case "month":
+                    return acc + "{MM}"
+                case "year":
+                    return acc + "{YY}"
+                case "literal":
+                    return acc + part.value
+                default:
+                    return ""
+            }
+        }, "")
+
+        return format || DEFAULT_PROJECT_NAME
+    } catch {
+        return DEFAULT_PROJECT_NAME
+    }
+}
+export function getProjectName(updater = get(special)) {
+    let name = updater.default_project_name ?? getDefaultProjectName()
+
+    let date = new Date()
+
+    // use Dnum date if it exists
+    const dNumMatch = name.match(/{D[0-7]}/)
+    if (dNumMatch) {
+        const dNum = parseInt(dNumMatch[0].match(/\d/)?.[0] || "0")
+        date = getNextWeekdayDate(date, dNum === 7 ? 0 : dNum)
+    }
+
     projectReplacers.forEach((a) => {
         name = name.replaceAll(`{${a.id}}`, a.value(date))
     })

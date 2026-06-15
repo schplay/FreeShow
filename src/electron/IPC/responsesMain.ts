@@ -1,69 +1,57 @@
+import * as Sentry from "@sentry/electron/main"
 import type { BrowserWindow, DesktopCapturerSource } from "electron"
 import { app, desktopCapturer, screen, shell, systemPreferences } from "electron"
-import { machineIdSync } from "node-machine-id"
 import os from "os"
 import path from "path"
 import { getMainWindow, isProd, mainWindow, maximizeMain, setGlobalMenu } from ".."
 import type { MainResponses } from "../../types/IPC/Main"
 import { Main } from "../../types/IPC/Main"
 import type { ErrorLog, LyricSearchResult, OS } from "../../types/Main"
-import { setPlayingState, unsetPlayingAudio } from "../audio/nowPlaying"
+import { getAudioMetadata } from "../audio/audio"
+import { openNowPlaying, setPlayingState, unsetPlayingAudio } from "../audio/nowPlaying"
+import { canSync, getSyncTeams, hasDataChanged, hasTeamData, markAsNewSync, restoreCloudBackup, syncData } from "../cloud/syncManager"
 import { ContentProviderRegistry } from "../contentProviders"
-import { restoreFiles } from "../data/backup"
+import { ChurchAppsChat } from "../contentProviders/churchApps/ChurchAppsChat"
+import { deleteBackup, getBackups, restoreFiles } from "../data/backup"
+import { getLocalIPs } from "../data/bonjour"
 import { checkIfMediaDownloaded, downloadLessonsMedia, downloadMedia } from "../data/downloadMedia"
 import { importShow } from "../data/import"
 import { save } from "../data/save"
-import { _store, appDataPath, createStores, getStore, getStoreValue, setStoreValue } from "../data/store"
+import { _store, appDataPath, config, createStores, getStore, getStoreValue, setStoreValue } from "../data/store"
 import { captureSlide, doesMediaExist, getThumbnail, getThumbnailFolderPath, pdfToImage, saveImage } from "../data/thumbnails"
 import { OutputHelper } from "../output/OutputHelper"
 import { libreConvert } from "../output/ppt/libreConverter"
 import { getPresentationApplications, presentationControl, startSlideshow } from "../output/ppt/presentation"
 import { closeServers, startServers, updateServerData } from "../servers"
+import { processAudioData, timecodeStart, timecodeStop, updateTimecodeValue } from "../timecode/timecode"
 import { apiReturnData, emitOSC, startWebSocketAndRest, stopApiListener } from "../utils/api"
 import { closeMain } from "../utils/close"
-import {
-    bundleMediaFiles,
-    getDataFolderPath,
-    getDataFolderRoot,
-    getFileInfo,
-    getFolderContent,
-    getFoldersContent,
-    getMediaCodec,
-    getMediaTracks,
-    getPaths,
-    getSimularPaths,
-    getTempPaths,
-    loadFile,
-    loadShows,
-    locateMediaFile,
-    openInSystem,
-    readExifData,
-    readFile,
-    selectFiles,
-    selectFilesDialog,
-    selectFolder,
-    writeFile
-} from "../utils/files"
+import { addToMediaFolder, bundleMediaFiles, getDataFolderPath, getDataFolderRoot, getFileInfo, getMediaCodec, getMediaSyncFolderPath, getMediaTracks, getPaths, getSimularPaths, loadFile, loadShowsAsync, locateMediaFile, openInSystem, readExifData, readFile, readFolder, readFolderContent, selectFiles, selectFilesDialog, selectFolder, setMediaSyncFolderPath, writeFile } from "../utils/files"
+import { getMachineId } from "../utils/helpers"
 import { LyricSearch } from "../utils/LyricSearch"
 import { closeMidiInPorts, getMidiInputs, getMidiOutputs, receiveMidi, sendMidi } from "../utils/midi"
 import { deleteShows, deleteShowsNotIndexed, getAllShows, getEmptyShows, refreshAllShows } from "../utils/shows"
 import { correctSpelling } from "../utils/spellcheck"
+import { executeSpotifyCommand, getSpotifyState } from "../utils/spotify"
 import checkForUpdates from "../utils/updater"
 
+// no need to await Promise returns here
 export const mainResponses: MainResponses = {
     // DEV
     [Main.LOG]: (data) => console.info(data),
     [Main.IS_DEV]: () => !isProd,
-    [Main.GET_TEMP_PATHS]: () => getTempPaths(),
+    [Main.GET_CACHE_PATH]: () => getThumbnailFolderPath(),
     // APP
     [Main.VERSION]: () => getVersion(),
     [Main.GET_OS]: () => getOS(),
     [Main.DEVICE_ID]: () => getMachineId(),
-    [Main.IP]: () => os.networkInterfaces(),
+    [Main.GET_DEVICE_NAME]: () => getDeviceName(),
+    [Main.IP]: () => getLocalIPs(),
+    [Main.CHECK_RAM_USAGE]: () => checkRamUsage(),
     // STORES
     [Main.SETTINGS]: () => getStore("SETTINGS"),
     [Main.SYNCED_SETTINGS]: () => getStore("SYNCED_SETTINGS"),
-    [Main.STAGE_SHOWS]: () => getStore("STAGE_SHOWS"),
+    [Main.STAGE]: () => getStore("STAGE"),
     [Main.PROJECTS]: () => getStore("PROJECTS"),
     [Main.OVERLAYS]: () => getStore("OVERLAYS"),
     [Main.TEMPLATES]: () => getStore("TEMPLATES"),
@@ -83,22 +71,29 @@ export const mainResponses: MainResponses = {
     [Main.SPELLCHECK]: (a) => correctSpelling(a),
     /// //////////////////////
     [Main.SAVE]: (a) => save(a),
+    [Main.BACKUPS]: () => getBackups(),
+    [Main.DELETE_BACKUP]: (data) => deleteBackup(data),
     [Main.IMPORT]: (data) => startImport(data),
+    [Main.IMPORT_FILES]: (data) => importFiles(data),
     [Main.BIBLE]: (data) => loadScripture(data),
     [Main.SHOW]: (data) => loadShow(data),
     // MAIN
-    [Main.SHOWS]: () => loadShows(),
+    [Main.SHOWS]: (() => loadShowsAsync()) as any,
     [Main.AUTO_UPDATE]: () => checkForUpdates(),
     [Main.URL]: (data) => openURL(data),
     [Main.LANGUAGE]: (data) => setGlobalMenu(data.strings),
     [Main.GET_PATHS]: () => getPaths(),
     [Main.DATA_PATH]: () => getDataFolderRoot(),
-    [Main.UPDATE_DATA_PATH]: (data) => createStores(data.oldPath),
+    [Main.UPDATE_DATA_PATH]: (data) => {
+        config.set("dataPath", data.newPath)
+        createStores(data.oldPath)
+    },
     [Main.LOG_ERROR]: (data) => logError(data),
     [Main.OPEN_LOG]: () => openInSystem(_store.ERROR_LOG?.path || ""),
     [Main.OPEN_CACHE]: () => openInSystem(getThumbnailFolderPath(), true),
     [Main.OPEN_APPDATA]: () => openInSystem(appDataPath, true),
     [Main.OPEN_FOLDER_PATH]: (folderPath) => openInSystem(folderPath, true),
+    [Main.OPEN_NOW_PLAYING]: () => openNowPlaying(),
     [Main.GET_STORE_VALUE]: (data) => getStoreValue(data),
     [Main.SET_STORE_VALUE]: (data) => setStoreValue(data),
     // SHOWS
@@ -114,7 +109,7 @@ export const mainResponses: MainResponses = {
     [Main.OUTPUT]: (_, e) => (e.sender.id === getMainWindow()?.webContents.id ? "false" : "true"),
     // MEDIA
     [Main.DOES_MEDIA_EXIST]: (data) => doesMediaExist(data),
-    [Main.GET_THUMBNAIL]: (data) => getThumbnail(data),
+    [Main.GET_THUMBNAIL]: async (data) => await getThumbnail(data),
     [Main.SAVE_IMAGE]: (data) => saveImage(data),
     [Main.PDF_TO_IMAGE]: (data) => pdfToImage(data),
     [Main.READ_EXIF]: (data) => readExifData(data),
@@ -126,6 +121,7 @@ export const mainResponses: MainResponses = {
     [Main.NOW_PLAYING]: (data) => setPlayingState(data),
     [Main.NOW_PLAYING_UNSET]: () => unsetPlayingAudio(),
     // [Main.MEDIA_BASE64]: (data) => storeMedia(data),
+    [Main.READ_AUDIO_METADATA]: async (data) => await getAudioMetadata(data.filePath),
     [Main.CAPTURE_SLIDE]: (data) => captureSlide(data),
     [Main.ACCESS_CAMERA_PERMISSION]: () => getPermission("camera"),
     [Main.ACCESS_MICROPHONE_PERMISSION]: () => getPermission("microphone"),
@@ -156,32 +152,46 @@ export const mainResponses: MainResponses = {
     [Main.GET_LYRICS]: (data) => getLyrics(data),
     [Main.SEARCH_LYRICS]: (data) => searchLyrics(data),
     // FILES
-    [Main.RESTORE]: () => restoreFiles(),
+    [Main.RESTORE]: (data) => restoreFiles(data),
+    [Main.RECORDER]: (data) => saveRecording(data),
     [Main.SYSTEM_OPEN]: (data) => openInSystem(data),
     [Main.LOCATE_MEDIA_FILE]: (data) => locateMediaFile(data),
-    [Main.GET_SIMULAR]: (data) => getSimularPaths(data),
-    [Main.BUNDLE_MEDIA_FILES]: () => bundleMediaFiles(),
+    [Main.GET_MEDIA_FOLDER_PATH]: () => getMediaSyncFolderPath(),
+    [Main.SET_MEDIA_FOLDER_PATH]: (data) => setMediaSyncFolderPath(data),
+    [Main.GET_SIMILAR]: (data) => getSimularPaths(data),
+    [Main.BUNDLE_MEDIA_FILES]: (data) => bundleMediaFiles(data),
+    [Main.MEDIA_FOLDER_COPY]: (data) => addToMediaFolder(data.paths),
+    [Main.READ_BIBLES_FOLDER]: () => readBiblesFolder(),
     [Main.FILE_INFO]: (data) => getFileInfo(data),
-    [Main.READ_FOLDER]: (data) => getFolderContent(data),
-    [Main.READ_FOLDERS]: (data) => getFoldersContent(data),
+    [Main.READ_FOLDER]: (data) => readFolderContent(data),
     [Main.READ_FILE]: (data) => ({ content: readFile(data.path) }),
     [Main.OPEN_FOLDER]: (data) => selectFolder(data),
     [Main.OPEN_FILE]: (data) => selectFiles(data),
+    // SYNC
+    [Main.CAN_SYNC]: (data) => canSync(data),
+    [Main.GET_TEAMS]: (data) => getSyncTeams(data),
+    [Main.CLOUD_DATA]: (data) => hasTeamData(data),
+    [Main.CLOUD_CHANGED]: (data) => hasDataChanged(data),
+    [Main.CLOUD_SYNC]: (data) => syncData(data),
+    [Main.RESTORE_CLOUD_BACKUP]: (data) => restoreCloudBackup(data),
+    [Main.GET_CONVERSATION_ID]: (data) => getConversationId(data.teamId),
+    [Main.SEND_SOCKET_MESSAGE]: (data) => sendSocketMessage(data),
     // Provider-based routing
     [Main.PROVIDER_LOAD_SERVICES]: async (data) => {
-        await ContentProviderRegistry.loadServices(data.providerId)
+        if (data.cloudOnly) markAsNewSync()
+        await ContentProviderRegistry.loadServices(data.providerId, data.cloudOnly || false, data.data)
     },
     [Main.PROVIDER_DISCONNECT]: (data) => {
         ContentProviderRegistry.disconnect(data.providerId, data.scope)
         return { success: true }
     },
     [Main.PROVIDER_STARTUP_LOAD]: async (data) => {
-        await ContentProviderRegistry.startupLoad(data.providerId, data.scope || "", data.data)
+        await ContentProviderRegistry.startupLoad(data.providerId, data.scope || "", data.data, data.cloudOnly)
     },
     // Content Library
     [Main.GET_CONTENT_PROVIDERS]: () => {
         const providers = ContentProviderRegistry.getAvailableProviders()
-        return providers.map(providerId => {
+        return providers.map((providerId) => {
             const provider = ContentProviderRegistry.getProvider(providerId)
             return {
                 providerId,
@@ -205,6 +215,26 @@ export const mainResponses: MainResponses = {
             return []
         }
         return await provider.getContent(data.key)
+    },
+    [Main.CHECK_MEDIA_LICENSE]: async (data) => {
+        const provider = ContentProviderRegistry.getProvider(data.providerId)
+        if (!provider?.checkMediaLicense) {
+            console.error(`Provider ${data.providerId} does not support checkMediaLicense`)
+            return null
+        }
+        return await provider.checkMediaLicense(data.mediaId)
+    },
+    // Timecode
+    [Main.TIMECODE_START]: (data) => timecodeStart(data),
+    [Main.TIMECODE_STOP]: () => timecodeStop(),
+    [Main.TIMECODE_VALUE]: (data) => updateTimecodeValue(data),
+    [Main.TIMECODE_STATUS]: (data) => console.log(data),
+    [Main.TIMECODE_AUDIO_DATA]: (data) => processAudioData(data),
+    // Spotify
+    [Main.SPOTIFY_GET_STATE]: () => getSpotifyState(),
+    [Main.SPOTIFY_COMMAND]: async (data) => {
+        await executeSpotifyCommand(data.command, data.value)
+        return true
     }
 }
 
@@ -218,6 +248,10 @@ export function startImport(data: { channel: string; format: { name: string; ext
     if (needsFileAndNoFileSelected) return
 
     importShow(data.channel, files || null, data.settings || {})
+}
+
+function importFiles(data: { id: string; paths: string[] }) {
+    importShow(data.id, data.paths, {})
 }
 
 // BIBLE
@@ -248,6 +282,15 @@ export function loadScripture(msg: { id: string; name: string }) {
     return bible
 }
 
+function readBiblesFolder() {
+    const bibleFolder: string = getDataFolderPath("scriptures")
+    const names = readFolder(bibleFolder)
+    return names.map((name) => {
+        const filePath = path.join(bibleFolder, name)
+        return { path: filePath, name: name.replace(/\.fsb$/i, "") }
+    })
+}
+
 // SHOW
 export function loadShow(msg: { id: string; name: string }) {
     const showsFolder = getDataFolderPath("shows")
@@ -255,10 +298,6 @@ export function loadShow(msg: { id: string; name: string }) {
     const show = loadFile(filePath, msg.id)
 
     return show
-}
-
-export function getMachineId() {
-    return machineIdSync() as string
 }
 
 function getVersion() {
@@ -270,8 +309,39 @@ function getVersion() {
     }
 }
 
+async function getConversationId(teamId: string): Promise<string | null> {
+    return ChurchAppsChat.getOrCreateConversation(teamId)
+}
+
+async function sendSocketMessage(data: { churchId: string; teamId: string; displayName: string; content: string }): Promise<boolean> {
+    const conversationId = await ChurchAppsChat.getOrCreateConversation(data.teamId)
+    if (!conversationId) return false
+    return ChurchAppsChat.sendMessage({ churchId: data.churchId, conversationId, displayName: data.displayName, content: data.content })
+}
+
 function getOS() {
     return { platform: os.platform(), name: os.hostname(), arch: os.arch() } as OS
+}
+
+function getDeviceName() {
+    return (os.hostname() || "").replace(".local", "")
+}
+
+function checkRamUsage() {
+    const total = os.totalmem()
+    const free = os.freemem()
+
+    return { total, free, performanceMode: shouldEnablePerformanceMode() }
+
+    function shouldEnablePerformanceMode() {
+        const totalGB = total / 1024 / 1024 / 1024
+        const lowTotalRAM = totalGB <= 8
+
+        const usedPercent = (total - free) / total
+        const highUsage = usedPercent > 0.98
+
+        return lowTotalRAM || highUsage
+    }
 }
 
 // URL: open url in default web browser
@@ -320,13 +390,13 @@ function getScreens(type: "window" | "screen" = "screen"): Promise<{ name: strin
         OutputHelper.getAllOutputs().forEach((output) => {
             if (output.window) windows.push(output.window)
         })
-            ;[mainWindow!, ...windows].forEach((window) => {
-                const mediaId = window?.getMediaSourceId()
-                const windowsAlreadyExists = sources.find((a) => a.id === mediaId)
-                if (windowsAlreadyExists) return
+        ;[mainWindow!, ...windows].forEach((window) => {
+            const mediaId = window?.getMediaSourceId()
+            const windowsAlreadyExists = sources.find((a) => a.id === mediaId)
+            if (windowsAlreadyExists) return
 
-                screens.push({ name: window?.getTitle(), id: mediaId })
-            })
+            screens.push({ name: window?.getTitle(), id: mediaId })
+        })
 
         return screens
     }
@@ -335,11 +405,11 @@ function getScreens(type: "window" | "screen" = "screen"): Promise<{ name: strin
 // RECORDER
 // only open once per session
 let systemOpened = false
-export function saveRecording(_: Electron.IpcMainEvent, msg: any) {
+export function saveRecording(data: { blob: ArrayBuffer; name: string }) {
     const folder = getDataFolderPath("recordings")
-    const filePath = path.join(folder, msg.name)
+    const filePath = path.join(folder, data.name)
 
-    const buffer = Buffer.from(msg.blob)
+    const buffer = Buffer.from(data.blob)
     writeFile(filePath, buffer)
 
     if (!systemOpened) {
@@ -366,7 +436,11 @@ export function logError(log: ErrorLog, key: "main" | "renderer" | "request" = "
 }
 
 const ERROR_FILTER = [
-    "ENOENT: no such file or directory" // file/folder does not exist
+    "ENOENT: no such file or directory", // file/folder does not exist
+    "::internal::", // internal errors (v8 / partition_alloc)
+    "crash_reporter::DumpWithoutCrashing", // chromium crashes
+    "ERR_INTERNET_DISCONNECTED", // internet disconnected
+    "First argument to DataView constructor must be an ArrayBuffer" // mp4box issue
 ]
 export function catchErrors() {
     process.on("uncaughtException", (err) => {
@@ -385,6 +459,21 @@ export function createLog(err: Error) {
         message: err.message,
         stack: err.stack
     } as ErrorLog
+}
+
+export function autoErrorReport() {
+    if (!isProd) return
+    if (config.get("autoErrorReporting") === false) return
+
+    Sentry.init({
+        dsn: "https://5d1069c3cb6faaa6e7ad0d9dc0145361@o4510419080445952.ingest.us.sentry.io/4510419082346496",
+        beforeSend(event) {
+            // filter out known non-critical errors
+            const errorMessage = event.exception?.values?.[0]?.value || ""
+            const shouldFilter = ERROR_FILTER.some((filter) => errorMessage.includes(filter))
+            return shouldFilter ? null : event
+        }
+    })
 }
 
 // STORE MEDIA AS BASE64
