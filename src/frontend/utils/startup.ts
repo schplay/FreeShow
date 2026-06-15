@@ -118,8 +118,9 @@ function autoBackup() {
 }
 
 export function contentProviderSync() {
+    const pcoData = get(contentProviderData).planningcenter
     const providers = [
-        { providerId: "planningcenter" as ContentProviderId, scope: "services" },
+        { providerId: "planningcenter" as ContentProviderId, scope: "services", data: pcoData?.selectedFolderIds?.length ? { selectedFolderIds: pcoData.selectedFolderIds } : undefined },
         { providerId: "churchApps" as ContentProviderId, scope: "plans", data: { shows: get(shows), categories: get(contentProviderData).churchApps?.syncCategories || [] } },
         { providerId: "amazinglife" as ContentProviderId, scope: "openid profile email" }
     ]

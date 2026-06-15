@@ -1,7 +1,7 @@
 import { ContentProvider } from "../base/ContentProvider"
 import { getKey } from "../../utils/keys"
 import { pcoConnect, pcoDisconnect, pcoInitialize, pcoStartupLoad, type PCOScopes } from "./connect"
-import { pcoRequest, pcoLoadServices } from "./request"
+import { pcoRequest, pcoLoadServices, pcoFetchFolderTree, type PCOFolderTreeNode } from "./request"
 
 // Re-export types from connect file
 export type { PCOScopes } from "./connect"
@@ -54,13 +54,17 @@ export class PlanningCenterProvider extends ContentProvider<PCOScopes, PCOAuthDa
         return pcoRequest(data)
     }
 
-    async loadServices(): Promise<void> {
-        return pcoLoadServices()
+    async loadServices(data?: { selectedFolderIds?: string[] }): Promise<void> {
+        return pcoLoadServices(data?.selectedFolderIds)
     }
 
-    async startupLoad(scope: PCOScopes): Promise<void> {
+    async fetchFolderTree(): Promise<PCOFolderTreeNode[]> {
+        return pcoFetchFolderTree()
+    }
+
+    async startupLoad(scope: PCOScopes, data?: { selectedFolderIds?: string[] }): Promise<void> {
         pcoInitialize()
-        return pcoStartupLoad(scope)
+        return pcoStartupLoad(scope, data?.selectedFolderIds)
     }
 
     protected handleAuthCallback(_req: any, _res: any): void {

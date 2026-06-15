@@ -148,6 +148,24 @@ interface ServiceType {
     attributes: {
         name: string
     }
+    relationships?: {
+        parent?: { data: { id: string } | null }
+    }
+}
+
+interface PCOFolder {
+    id: string
+    attributes: { name: string }
+    relationships: {
+        parent: { data: { id: string } | null }
+    }
+}
+
+export interface PCOFolderTreeNode {
+    id: string
+    name: string
+    type: "folder" | "service_type"
+    children: PCOFolderTreeNode[]
 }
 
 interface Plan {
@@ -243,11 +261,93 @@ export async function pcoRequest(data: PCORequestData, attempt = 0): Promise<any
 
 const ONE_WEEK_MS = 604800000
 
-export async function pcoLoadServices() {
-    const serviceTypes = await fetchServiceTypes()
-    if (!serviceTypes) {
-        console.info("No service types found in Planning Center")
-        return
+export async function pcoFetchFolderTree(): Promise<PCOFolderTreeNode[]> {
+    const rawFolders = await pcoRequest({ scope: "services", endpoint: "folders" })
+    if (!rawFolders?.length) return []
+
+    // Build folder hierarchy from the folders flat list (parent relationship IS populated for folders)
+    const folderMap = new Map<string, PCOFolderTreeNode>()
+    rawFolders.forEach((f: PCOFolder) => folderMap.set(f.id, { id: f.id, name: f.attributes.name, type: "folder", children: [] }))
+
+    const rootNodes: PCOFolderTreeNode[] = []
+    rawFolders.forEach((f: PCOFolder) => {
+        const parentId = f.relationships?.parent?.data?.id
+        const node = folderMap.get(f.id)!
+        if (parentId && folderMap.has(parentId)) folderMap.get(parentId)!.children.push(node)
+        else rootNodes.push(node)
+    })
+
+    // Fetch service types per-folder — the flat service_types endpoint does not reliably
+    // include the parent relationship, so we query each folder directly instead
+    const serviceTypeIdsInFolders = new Set<string>()
+    await Promise.all(
+        rawFolders.map(async (f: PCOFolder) => {
+            const stList = await pcoRequest({ scope: "services", endpoint: `folders/${f.id}/service_types` })
+            if (!stList) return
+            stList.forEach((st: ServiceType) => {
+                if (!st?.id) return
+                serviceTypeIdsInFolders.add(st.id)
+                folderMap.get(f.id)?.children.push({ id: st.id, name: st.attributes.name, type: "service_type", children: [] })
+            })
+        })
+    )
+
+    // Append any root-level service types (not in any folder) at the end
+    const allServiceTypes = await pcoRequest({ scope: "services", endpoint: "service_types" })
+    if (allServiceTypes) {
+        allServiceTypes.forEach((st: ServiceType) => {
+            if (!st?.id || serviceTypeIdsInFolders.has(st.id)) return
+            rootNodes.push({ id: st.id, name: st.attributes.name, type: "service_type", children: [] })
+        })
+    }
+
+    return rootNodes
+}
+
+function expandFolderIds(allFolders: PCOFolder[], selectedFolderIds: string[]): string[] {
+    const included = new Set<string>(selectedFolderIds)
+    let changed = true
+    while (changed) {
+        changed = false
+        allFolders.forEach((f) => {
+            const parentId = f.relationships?.parent?.data?.id
+            if (parentId && included.has(parentId) && !included.has(f.id)) {
+                included.add(f.id)
+                changed = true
+            }
+        })
+    }
+    return Array.from(included)
+}
+
+async function getServiceTypesForFolders(rawFolders: PCOFolder[], selectedFolderIds: string[]): Promise<ServiceType[]> {
+    const expandedIds = expandFolderIds(rawFolders, selectedFolderIds)
+    const results = await Promise.all(expandedIds.map((id) => pcoRequest({ scope: "services", endpoint: `folders/${id}/service_types` })))
+    const seen = new Set<string>()
+    return (results.flat() as ServiceType[]).filter((st) => st?.id && !seen.has(st.id) && !!seen.add(st.id))
+}
+
+export async function pcoLoadServices(selectedFolderIds?: string[]) {
+    let serviceTypes: ServiceType[]
+
+    if (selectedFolderIds?.length) {
+        const rawFolders = await pcoRequest({ scope: "services", endpoint: "folders" })
+        if (!rawFolders) {
+            console.info("Could not fetch Planning Center folders")
+            return
+        }
+        serviceTypes = await getServiceTypesForFolders(rawFolders, selectedFolderIds)
+        if (!serviceTypes.length) {
+            sendToMain(ToMain.ALERT, "No services found in the selected folders. Check your folder selection in Settings > Connection.")
+            return
+        }
+    } else {
+        const all = await fetchServiceTypes()
+        if (!all) {
+            console.info("No service types found in Planning Center")
+            return
+        }
+        serviceTypes = all
     }
 
     sendToMain(ToMain.TOAST, "Getting schedules from Planning Center")

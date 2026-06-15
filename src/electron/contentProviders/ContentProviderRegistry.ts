@@ -6,6 +6,7 @@ import { ContentProviderFactory } from "./base/ContentProvider"
 import type { ContentProviderId } from "./base/types"
 import { ChurchAppsProvider } from "./churchApps/ChurchAppsProvider"
 import { PlanningCenterProvider } from "./planningCenter/PlanningCenterProvider"
+import type { PCOFolderTreeNode } from "./planningCenter/request"
 
 /**
  * Registry for all content providers in the application.
@@ -137,6 +138,18 @@ export class ContentProviderRegistry {
         } catch (error) {
             console.error(`Failed to perform startup load for ${providerId}:`, error)
         }
+    }
+
+    /**
+     * Fetch the folder/service-type tree for a provider (Planning Center only for now)
+     */
+    static async fetchFolderTree(providerId: ContentProviderId): Promise<PCOFolderTreeNode[]> {
+        this.ensureInitialized()
+        const provider = this.getProvider<PlanningCenterProvider>(providerId)
+        if (typeof (provider as any)?.fetchFolderTree === "function") {
+            return (provider as any).fetchFolderTree()
+        }
+        return []
     }
 
     /**

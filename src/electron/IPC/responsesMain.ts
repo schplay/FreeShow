@@ -188,6 +188,9 @@ export const mainResponses: MainResponses = {
     [Main.PROVIDER_STARTUP_LOAD]: async (data) => {
         await ContentProviderRegistry.startupLoad(data.providerId, data.scope || "", data.data, data.cloudOnly)
     },
+    [Main.PROVIDER_FETCH_FOLDERS]: async (data) => {
+        return ContentProviderRegistry.fetchFolderTree(data.providerId)
+    },
     // Content Library
     [Main.GET_CONTENT_PROVIDERS]: () => {
         const providers = ContentProviderRegistry.getAvailableProviders()
