@@ -29,9 +29,12 @@ export function startTimer() {
     timeout = setTimeout(() => {
         const newActiveTimers = clone(get(activeTimers)).map(increment)
 
-        // send(OUTPUT, ["ACTIVE_TIMERS"], newActiveTimers)
-        send(STAGE, ["ACTIVE_TIMERS"], newActiveTimers)
-        activeTimers.set(newActiveTimers)
+        // Update store: apply incremented non-PCO values, but preserve current PCO values
+        // from the live store to avoid overwriting pcoLiveSync updates with a stale clone.
+        activeTimers.update((current) => newActiveTimers.map((t) => t.pcoLive ? (current.find((c) => c.id === t.id) ?? t) : t))
+
+        // send(OUTPUT, ["ACTIVE_TIMERS"], get(activeTimers))
+        send(STAGE, ["ACTIVE_TIMERS"], get(activeTimers))
 
         timeout = null
         startTimer()

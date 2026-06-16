@@ -42,7 +42,7 @@ function serviceScheduleFallback(cached: LiveCacheEntry, now: number): number {
         return Math.round((cached.serviceStartAt.getTime() - now) / 1000)
     }
     if (cached.serviceEndAt) {
-        return Math.max(0, Math.round((cached.serviceEndAt.getTime() - now) / 1000))
+        return Math.round((cached.serviceEndAt.getTime() - now) / 1000)
     }
     return 0
 }
@@ -148,16 +148,19 @@ function tickPcoTimers() {
 
                 if (timer.pcoCountdownType === "end_service") {
                     if (cached.serviceEndAt) {
-                        currentTime = Math.max(0, Math.round((cached.serviceEndAt.getTime() - now) / 1000))
+                        currentTime = Math.round((cached.serviceEndAt.getTime() - now) / 1000)
                     }
                 } else if (!isLive || cached.isPreService) {
                     currentTime = serviceScheduleFallback(cached, now)
                 } else if (cached.liveStartAt && effectiveLength != null && effectiveLength > 0) {
                     const endMs = cached.liveStartAt.getTime() + effectiveLength * 1000
-                    currentTime = Math.max(0, Math.round((endMs - now) / 1000))
+                    currentTime = Math.round((endMs - now) / 1000)
                 } else {
                     currentTime = 0
                 }
+
+                // Mirror standard timer behaviour: clamp to 0 unless the timer has overflow enabled
+                if (currentTime < 0 && !timer.overflow) currentTime = 0
             }
 
             const existing = a.find((t) => t.id === id)
