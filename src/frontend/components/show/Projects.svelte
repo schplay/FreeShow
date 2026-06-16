@@ -4,7 +4,7 @@
     import { Main } from "../../../types/IPC/Main"
     import type { Project, Tree } from "../../../types/Projects"
     import { sendMain } from "../../IPC/main"
-    import { activeProject, activeRename, dictionary, drawer, editingProjectTemplate, focusMode, folders, openedFolders, projects, projectTemplates, projectView, showRecentlyUsedProjects, sorted, special } from "../../stores"
+    import { activeProject, activeRename, contentProviderData, dictionary, drawer, editingProjectTemplate, focusMode, folders, openedFolders, projects, projectTemplates, projectView, showRecentlyUsedProjects, sorted, special } from "../../stores"
     import { translateText } from "../../utils/language"
     import { getAccess } from "../../utils/profile"
     import { exportProject } from "../export/project"
@@ -23,6 +23,7 @@
     import Autoscroll from "../system/Autoscroll.svelte"
     import DropArea from "../system/DropArea.svelte"
     import { getRecentlyUsedProjects, openProject } from "./project"
+    import PcoServicePicker from "./PcoServicePicker.svelte"
     import ProjectContentList from "./ProjectContentList.svelte"
     import ProjectList from "./ProjectList.svelte"
 
@@ -91,6 +92,9 @@
 
     $: projectActive = !$projectView && $activeProject !== null
     $: currentProject = $activeProject ? $projects[$activeProject] : null
+    $: currentProjectPcoFolderId = $activeProject
+        ? ($contentProviderData?.planningcenter?.availablePlans as { planId: string; serviceTypeId: string }[] | undefined)?.find((p) => p.planId === $activeProject)?.serviceTypeId
+        : undefined
 
     function createProject(folder = false) {
         let parent = interactedFolder || ($folders[currentProject?.parent || ""] ? currentProject?.parent || "/" : "/")
@@ -265,6 +269,21 @@
 
     let addMenuOpen = false
     $: if (projectActive) addMenuOpen = false
+    let showPcoPicker = false
+
+    function openPcoPicker() {
+        addMenuOpen = false
+        showPcoPicker = true
+    }
+
+    function onPcoServiceSelected(e: CustomEvent<{ serviceTypeId: string; planId: string }>) {
+        showPcoPicker = false
+        sendMain(Main.PCO_LOAD_PLAN, e.detail)
+    }
+
+    function refreshPcoProject(serviceTypeId: string, planId: string) {
+        sendMain(Main.PCO_LOAD_PLAN, { serviceTypeId, planId })
+    }
 
     let showProjectsOptions = false
     let showProjectDropdown = false
@@ -341,6 +360,10 @@
                                 <span style="opacity: 0.5;font-style: italic;"><T id="main.unnamed" /></span>
                             {/if}
                         </p>
+
+                        {#if currentProject && currentProjectPcoFolderId && $activeProject}
+                            <MaterialButton style="width: 32px;height: 100%;padding: 0.3em 0.5em;opacity: 0.7;" title="Sync with Planning Center" icon="refresh" on:click={() => refreshPcoProject(currentProjectPcoFolderId || "", $activeProject || "")} white />
+                        {/if}
 
                         <div class="right context">
                             <MaterialButton style="width: 32px;height: 100%;padding: 0.3em 0.5em;border-bottom-right-radius: 10px;{showProjectDropdown ? '' : 'opacity: 0.8;'}" title="create_show.more_options" icon="more" on:click={() => (showProjectDropdown = !showProjectDropdown)} white={!showProjectDropdown}>
@@ -496,7 +519,15 @@
                             <Icon id="folder" size={0.7} white />
                         </div>
                     </MaterialButton>
+
+                    <MaterialButton variant="outlined" icon="calendar" title="Planning Center" on:click={openPcoPicker} white>
+                        Planning Center
+                    </MaterialButton>
                 </div>
+            {/if}
+
+            {#if showPcoPicker}
+                <PcoServicePicker on:select={onPcoServiceSelected} on:close={() => (showPcoPicker = false)} />
             {/if}
 
             <FloatingInputs gradient style="width: 50px;height: 50px;border: none;">

@@ -478,7 +478,11 @@ export const mainResponses: MainResponses = {
         if (data.providerId === "planningcenter" && data.pcoPlans?.length) {
             contentProviderData.update((a) => {
                 if (!a.planningcenter) a.planningcenter = {}
-                a.planningcenter.availablePlans = data.pcoPlans
+                const existing: { planId: string; serviceTypeId: string; name: string; date: string }[] = a.planningcenter.availablePlans || []
+                const incoming: typeof existing = data.pcoPlans
+                // merge: replace entries with same planId, append new ones
+                const merged = [...existing.filter((e) => !incoming.find((i) => i.planId === e.planId)), ...incoming]
+                a.planningcenter.availablePlans = merged
                 return a
             })
         }

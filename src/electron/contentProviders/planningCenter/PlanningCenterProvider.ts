@@ -1,7 +1,7 @@
 import { ContentProvider } from "../base/ContentProvider"
 import { getKey } from "../../utils/keys"
 import { pcoConnect, pcoDisconnect, pcoInitialize, pcoStartupLoad, type PCOScopes } from "./connect"
-import { pcoRequest, pcoLoadServices, pcoFetchFolderTree, type PCOFolderTreeNode } from "./request"
+import { pcoRequest, pcoLoadServices, pcoFetchFolderTree, pcoFetchServiceTree, pcoLoadSinglePlan, type PCOFolderTreeNode } from "./request"
 import { pcoGetLiveData, pcoGetPusherAuth, type PCOLiveData } from "./live"
 
 // Re-export types from connect file
@@ -61,6 +61,14 @@ export class PlanningCenterProvider extends ContentProvider<PCOScopes, PCOAuthDa
 
     async fetchFolderTree(): Promise<PCOFolderTreeNode[]> {
         return pcoFetchFolderTree()
+    }
+
+    async fetchServiceTree(): Promise<PCOFolderTreeNode[]> {
+        return pcoFetchServiceTree()
+    }
+
+    async loadSinglePlan(serviceTypeId: string, planId: string): Promise<void> {
+        return pcoLoadSinglePlan(serviceTypeId, planId)
     }
 
     async getLiveData(serviceTypeId: string, planId: string): Promise<PCOLiveData | null> {

@@ -154,6 +154,8 @@ export enum Main {
     PROVIDER_FETCH_FOLDERS = "PROVIDER_FETCH_FOLDERS",
     PCO_LIVE_GET = "PCO_LIVE_GET",
     PCO_PUSHER_AUTH = "PCO_PUSHER_AUTH",
+    PCO_FETCH_SERVICE_TREE = "PCO_FETCH_SERVICE_TREE",
+    PCO_LOAD_PLAN = "PCO_LOAD_PLAN",
     // Content Library
     GET_CONTENT_PROVIDERS = "GET_CONTENT_PROVIDERS",
     GET_CONTENT_LIBRARY = "GET_CONTENT_LIBRARY",
@@ -252,6 +254,8 @@ export interface MainSendPayloads {
     [Main.PROVIDER_FETCH_FOLDERS]: { providerId: ContentProviderId }
     [Main.PCO_LIVE_GET]: { serviceTypeId: string; planId: string }
     [Main.PCO_PUSHER_AUTH]: { socketId: string; channelName: string; serviceTypeId: string }
+    [Main.PCO_FETCH_SERVICE_TREE]: undefined
+    [Main.PCO_LOAD_PLAN]: { serviceTypeId: string; planId: string }
     // Content Library
     [Main.GET_CONTENT_LIBRARY]: { providerId: ContentProviderId }
     [Main.GET_PROVIDER_CONTENT]: { providerId: ContentProviderId; key: string }
@@ -346,6 +350,7 @@ export interface MainReturnPayloads {
     // Provider-based routing
     [Main.PROVIDER_DISCONNECT]: { success: boolean }
     [Main.PROVIDER_FETCH_FOLDERS]: Promise<PCOFolderTreeNode[]>
+    [Main.PCO_FETCH_SERVICE_TREE]: Promise<PCOFolderTreeNode[]>
     [Main.PCO_LIVE_GET]: Promise<{
         liveId: string | null
         liveChannel: string | null

@@ -191,6 +191,16 @@ export const mainResponses: MainResponses = {
     [Main.PROVIDER_FETCH_FOLDERS]: async (data) => {
         return ContentProviderRegistry.fetchFolderTree(data.providerId)
     },
+    [Main.PCO_FETCH_SERVICE_TREE]: async () => {
+        return ContentProviderRegistry.fetchServiceTree("planningcenter")
+    },
+    [Main.PCO_LOAD_PLAN]: async (data) => {
+        try {
+            await ContentProviderRegistry.loadSinglePlan(data.serviceTypeId, data.planId)
+        } catch (err) {
+            console.error("[PCO] loadSinglePlan threw:", err)
+        }
+    },
     [Main.PCO_LIVE_GET]: async (data) => {
         try {
             return await ContentProviderRegistry.getPcoLiveData(data.serviceTypeId, data.planId)

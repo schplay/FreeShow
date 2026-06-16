@@ -154,6 +154,29 @@ export class ContentProviderRegistry {
     }
 
     /**
+     * Fetch the full folder/service-type/plan tree for selecting a specific PCO plan
+     */
+    static async fetchServiceTree(providerId: ContentProviderId): Promise<PCOFolderTreeNode[]> {
+        this.ensureInitialized()
+        const provider = this.getProvider<PlanningCenterProvider>(providerId)
+        if (typeof (provider as any)?.fetchServiceTree === "function") {
+            return (provider as any).fetchServiceTree()
+        }
+        return []
+    }
+
+    /**
+     * Load a single PCO plan by service type and plan ID
+     */
+    static async loadSinglePlan(serviceTypeId: string, planId: string): Promise<void> {
+        this.ensureInitialized()
+        const provider = this.getProvider<PlanningCenterProvider>("planningcenter")
+        if (typeof (provider as any)?.loadSinglePlan === "function") {
+            return (provider as any).loadSinglePlan(serviceTypeId, planId)
+        }
+    }
+
+    /**
      * Get PCO Live countdown data for a specific plan
      */
     static async getPcoLiveData(serviceTypeId: string, planId: string): Promise<PCOLiveData | null> {

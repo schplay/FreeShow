@@ -164,7 +164,8 @@ interface PCOFolder {
 export interface PCOFolderTreeNode {
     id: string
     name: string
-    type: "folder" | "service_type"
+    type: "folder" | "service_type" | "plan"
+    serviceTypeId?: string // only present on plan nodes
     children: PCOFolderTreeNode[]
 }
 
@@ -305,6 +306,93 @@ export async function pcoFetchFolderTree(): Promise<PCOFolderTreeNode[]> {
     }
 
     return rootNodes
+}
+
+async function fetchAllFuturePlans(serviceTypeId: string): Promise<PCOFolderTreeNode[]> {
+    const plans = await pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans`, params: { order: "sort_date", filter: "future", per_page: "25" } })
+    if (!plans?.length) return []
+    return plans
+        .filter((p: Plan) => p?.id)
+        .map((p: Plan) => ({ id: p.id, name: p.attributes.title || getDateTitle(p.attributes.sort_date), type: "plan" as const, serviceTypeId, children: [] }))
+}
+
+export async function pcoFetchServiceTree(): Promise<PCOFolderTreeNode[]> {
+    const rawFolders = await pcoRequest({ scope: "services", endpoint: "folders" })
+
+    const folderMap = new Map<string, PCOFolderTreeNode>()
+    const rootNodes: PCOFolderTreeNode[] = []
+
+    if (rawFolders?.length) {
+        rawFolders.forEach((f: PCOFolder) => folderMap.set(f.id, { id: f.id, name: f.attributes.name, type: "folder", children: [] }))
+        rawFolders.forEach((f: PCOFolder) => {
+            const parentId = f.relationships?.parent?.data?.id
+            const node = folderMap.get(f.id)!
+            if (parentId && folderMap.has(parentId)) folderMap.get(parentId)!.children.push(node)
+            else rootNodes.push(node)
+        })
+    }
+
+    const serviceTypeIdsInFolders = new Set<string>()
+
+    if (rawFolders?.length) {
+        await Promise.all(
+            rawFolders.map(async (f: PCOFolder) => {
+                const stList = await pcoRequest({ scope: "services", endpoint: `folders/${f.id}/service_types` })
+                if (!stList) return
+                await Promise.all(
+                    stList.map(async (st: ServiceType) => {
+                        if (!st?.id) return
+                        serviceTypeIdsInFolders.add(st.id)
+                        const planNodes = await fetchAllFuturePlans(st.id)
+                        folderMap.get(f.id)?.children.push({ id: st.id, name: st.attributes.name, type: "service_type", children: planNodes })
+                    })
+                )
+            })
+        )
+    }
+
+    const allServiceTypes = await pcoRequest({ scope: "services", endpoint: "service_types" })
+    if (allServiceTypes) {
+        await Promise.all(
+            allServiceTypes.map(async (st: ServiceType) => {
+                if (!st?.id || serviceTypeIdsInFolders.has(st.id)) return
+                const planNodes = await fetchAllFuturePlans(st.id)
+                rootNodes.push({ id: st.id, name: st.attributes.name, type: "service_type", children: planNodes })
+            })
+        )
+    }
+
+    return rootNodes
+}
+
+export async function pcoLoadSinglePlan(serviceTypeId: string, planId: string): Promise<void> {
+    const [stList, planList] = await Promise.all([
+        pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}` }),
+        pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans/${planId}` })
+    ])
+
+    const serviceType = stList?.[0]
+    const plan = planList?.[0]
+    if (!serviceType || !plan) {
+        sendToMain(ToMain.ALERT, "Could not load the selected Planning Center service.")
+        return
+    }
+
+    sendToMain(ToMain.TOAST, "Loading service from Planning Center")
+
+    const result = await processPlan(plan, serviceType)
+    if (!result) {
+        sendToMain(ToMain.ALERT, "No items found in the selected Planning Center service.")
+        return
+    }
+
+    sendToMain(ToMain.PROVIDER_PROJECTS, {
+        providerId: "planningcenter",
+        categoryName: "Planning Center",
+        shows: result.shows,
+        projects: [result.project],
+        pcoPlans: [{ planId: plan.id, serviceTypeId, name: result.project.name, date: plan.attributes.sort_date }]
+    })
 }
 
 function expandFolderIds(allFolders: PCOFolder[], selectedFolderIds: string[]): string[] {
