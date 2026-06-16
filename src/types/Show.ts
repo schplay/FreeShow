@@ -181,7 +181,7 @@ export interface ShowGroup {
 export interface Timer {
     id?: string
     name: string
-    type: "counter" | "clock" | "event"
+    type: "counter" | "clock" | "event" | "pco_live"
     viewType?: "time" | "line" | "circle"
     circleMask?: boolean
     showHours?: boolean // use just minutes or minutes and hours
@@ -191,6 +191,10 @@ export interface Timer {
     endDynamic?: string
     event?: string
     time?: string
+    // PCO Live countdown fields
+    pcoServiceTypeId?: string
+    pcoPlanId?: string
+    pcoCountdownType?: "full_length" | "end_on_time" | "end_service"
 
     warn?: boolean
     warnOffset?: number

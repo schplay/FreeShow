@@ -1196,7 +1196,7 @@
         "to": "To",
         "warn_early": "Early warning",
         "warn_offset": "Seconds before end",
-        "overflow": "Overflow when reached end",
+        "overflow": "Show overtime",
         "flash": "Flash",
         "preview": "Preview",
         "clock": "Clock",

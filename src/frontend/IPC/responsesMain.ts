@@ -473,6 +473,15 @@ export const mainResponses: MainResponses = {
         // open closest to today
         activeProject.set(data.projects.sort((a, b) => a.scheduledTo - b.scheduledTo)[0]?.id)
         projectView.set(false)
+
+        // store available PCO plans for timer configuration
+        if (data.providerId === "planningcenter" && data.pcoPlans?.length) {
+            contentProviderData.update((a) => {
+                if (!a.planningcenter) a.planningcenter = {}
+                a.planningcenter.availablePlans = data.pcoPlans
+                return a
+            })
+        }
     },
     [ToMain.OPEN_FOLDER2]: (a) => {
         const receiveFOLDER = {

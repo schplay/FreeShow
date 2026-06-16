@@ -228,6 +228,9 @@ export async function pcoRequest(data: PCORequestData, attempt = 0): Promise<any
                     return
                 }
 
+                // 404 means the resource doesn't exist (e.g., no active PCO Live session) — not an error
+                if (err.statusCode === 404) return resolve(null)
+
                 const message = err.message?.includes("401") ? "Make sure you have created some 'services' in your account!" : err.message
                 sendToMain(ToMain.ALERT, "Could not get data! " + message)
                 return resolve(null)
@@ -358,7 +361,7 @@ export async function pcoLoadServices(selectedFolderIds?: string[]) {
         downloadLessonsMedia(results.downloadableMedia)
     }
 
-    sendToMain(ToMain.PROVIDER_PROJECTS, { providerId: "planningcenter", categoryName: "Planning Center", shows: results.shows, projects: results.projects })
+    sendToMain(ToMain.PROVIDER_PROJECTS, { providerId: "planningcenter", categoryName: "Planning Center", shows: results.shows, projects: results.projects, pcoPlans: results.pcoPlans })
 }
 
 async function fetchServiceTypes() {
@@ -380,11 +383,21 @@ async function processAllServiceTypes(serviceTypes: ServiceType[]): Promise<any>
     const projects: Project[] = []
     const shows: Show[] = []
     const downloadableMedia: LessonsData[] = []
+    const pcoPlans: { planId: string; serviceTypeId: string; name: string; date: string }[] = []
 
     await Promise.all(
         serviceTypes.map(async (serviceType) => {
             const servicePlans = await fetchServicePlans(serviceType)
             if (!servicePlans || !servicePlans.length) return
+
+            servicePlans.forEach((plan: Plan) => {
+                pcoPlans.push({
+                    planId: plan.id,
+                    serviceTypeId: serviceType.id,
+                    name: plan.attributes.title || getDateTitle(plan.attributes.sort_date),
+                    date: plan.attributes.sort_date
+                })
+            })
 
             const results = await processServicePlans(servicePlans, serviceType)
 
@@ -394,7 +407,7 @@ async function processAllServiceTypes(serviceTypes: ServiceType[]): Promise<any>
         })
     )
 
-    return { projects, shows, downloadableMedia }
+    return { projects, shows, downloadableMedia, pcoPlans }
 }
 
 async function fetchServicePlans(serviceType: ServiceType) {

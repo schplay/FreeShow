@@ -191,6 +191,17 @@ export const mainResponses: MainResponses = {
     [Main.PROVIDER_FETCH_FOLDERS]: async (data) => {
         return ContentProviderRegistry.fetchFolderTree(data.providerId)
     },
+    [Main.PCO_LIVE_GET]: async (data) => {
+        try {
+            return await ContentProviderRegistry.getPcoLiveData(data.serviceTypeId, data.planId)
+        } catch (err) {
+            console.error("[PCO] getPcoLiveData threw:", err)
+            return null
+        }
+    },
+    [Main.PCO_PUSHER_AUTH]: async (data) => {
+        return ContentProviderRegistry.getPcoPusherAuth(data.socketId, data.channelName, data.serviceTypeId)
+    },
     // Content Library
     [Main.GET_CONTENT_PROVIDERS]: () => {
         const providers = ContentProviderRegistry.getAvailableProviders()

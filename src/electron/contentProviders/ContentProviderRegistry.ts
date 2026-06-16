@@ -7,6 +7,7 @@ import type { ContentProviderId } from "./base/types"
 import { ChurchAppsProvider } from "./churchApps/ChurchAppsProvider"
 import { PlanningCenterProvider } from "./planningCenter/PlanningCenterProvider"
 import type { PCOFolderTreeNode } from "./planningCenter/request"
+import type { PCOLiveData } from "./planningCenter/live"
 
 /**
  * Registry for all content providers in the application.
@@ -150,6 +151,30 @@ export class ContentProviderRegistry {
             return (provider as any).fetchFolderTree()
         }
         return []
+    }
+
+    /**
+     * Get PCO Live countdown data for a specific plan
+     */
+    static async getPcoLiveData(serviceTypeId: string, planId: string): Promise<PCOLiveData | null> {
+        this.ensureInitialized()
+        const provider = this.getProvider<PlanningCenterProvider>("planningcenter")
+        if (typeof (provider as any)?.getLiveData === "function") {
+            return (provider as any).getLiveData(serviceTypeId, planId)
+        }
+        return null
+    }
+
+    /**
+     * Authorize a Pusher channel subscription for PCO Live real-time updates
+     */
+    static async getPcoPusherAuth(socketId: string, channelName: string, serviceTypeId: string): Promise<{ auth: string; channel_data?: string } | null> {
+        this.ensureInitialized()
+        const provider = this.getProvider<PlanningCenterProvider>("planningcenter")
+        if (typeof (provider as any)?.getPusherAuth === "function") {
+            return (provider as any).getPusherAuth(socketId, channelName, serviceTypeId)
+        }
+        return null
     }
 
     /**

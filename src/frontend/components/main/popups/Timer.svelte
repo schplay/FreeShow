@@ -2,7 +2,7 @@
     import { onDestroy, onMount } from "svelte"
     import { uid } from "uid"
     import type { Timer } from "../../../../types/Show"
-    import { events, timers, drawerTabsData } from "../../../stores"
+    import { contentProviderData, events, timers, drawerTabsData } from "../../../stores"
     import { translateText } from "../../../utils/language"
     import { getDateString } from "../../drawer/calendar/calendar"
     import { getTimer, getTimerDynamicValue } from "../../drawer/timers/timers"
@@ -36,8 +36,25 @@
     const timerTypes: any = [
         { id: "counter", name: translateText("timer.from_to"), translate: true, icon: "timer" },
         { id: "clock", name: translateText("timer.to_time"), translate: true, icon: "clock" },
-        { id: "event", name: translateText("timer.to_event"), translate: true, icon: "calendar" }
+        { id: "event", name: translateText("timer.to_event"), translate: true, icon: "calendar" },
+        { id: "pco_live", name: "PCO Live Countdown", icon: "calendar" }
     ]
+
+    // PCO Live: available plans loaded after PCO sync
+    $: pcoAvailablePlans = ($contentProviderData.planningcenter?.availablePlans || []) as { planId: string; serviceTypeId: string; name: string; date: string }[]
+    $: pcoPlanOptions = pcoAvailablePlans.map((p) => ({ value: p.planId + "|" + p.serviceTypeId, label: `${p.name} (${new Date(p.date).toLocaleDateString()})` }))
+
+    const pcoCountdownTypeOptions = [
+        { value: "end_on_time", label: "End Item on Time" },
+        { value: "full_length", label: "Full Item Length" },
+        { value: "end_service", label: "End Service on Time" }
+    ]
+
+    function updatePcoPlan(e: any) {
+        const [planId, serviceTypeId] = (e.detail || "").split("|")
+        timer.pcoPlanId = planId || ""
+        timer.pcoServiceTypeId = serviceTypeId || ""
+    }
 
     // counter
     $: fromTime = secondsToTime(timer.start === undefined ? 300 : timer.start)
@@ -91,7 +108,8 @@
     let timerNames: any = {
         counter: translateText("timer.counter"),
         clock: translateText("timer.time"),
-        event: translateText("timer.event")
+        event: translateText("timer.event"),
+        pco_live: "PCO Live"
     }
     $: if (timer.event && eventList.length) updateEventName()
     const updateEventName = () => (timerNames.event = eventList.find((a) => a.id === timer.event)?.name)
@@ -154,7 +172,11 @@
         if (timer.tags) newTimer.tags = timer.tags
         if (timer.type === "event") newTimer.event = timer.event
         else if (timer.type === "clock") newTimer.time = timer.time || "12:00"
-        else {
+        else if (timer.type === "pco_live") {
+            newTimer.pcoServiceTypeId = timer.pcoServiceTypeId || ""
+            newTimer.pcoPlanId = timer.pcoPlanId || ""
+            newTimer.pcoCountdownType = timer.pcoCountdownType || "end_on_time"
+        } else {
             newTimer.start = timer.start === undefined ? 300 : Number(timer.start)
             newTimer.end = timer.end === undefined ? 0 : Number(timer.end)
 
@@ -290,6 +312,30 @@
                 <input type="time" step="2" value={timer.time} on:change={updateTime} />
             </div>
         </div>
+    {:else if timer.type === "pco_live"}
+        <div class="timerbox" style="width: 100%;margin: 20px 0;overflow: visible;">
+            <p style="border: none;min-height: unset;" class="part">PCO Live Countdown</p>
+            <div style="flex-direction: column;gap: 8px;padding: 12px;">
+                {#if !pcoAvailablePlans.length}
+                    <p style="opacity: 0.6;font-size: 0.9em;">No PCO plans found. Sync with Planning Center in Settings → Connection first.</p>
+                {:else}
+                    <MaterialDropdown
+                        label="Service plan"
+                        style="width: 100%;"
+                        options={pcoPlanOptions}
+                        value={(timer.pcoPlanId && timer.pcoServiceTypeId) ? timer.pcoPlanId + "|" + timer.pcoServiceTypeId : ""}
+                        on:change={updatePcoPlan}
+                    />
+                {/if}
+                <MaterialDropdown
+                    label="Countdown type"
+                    style="width: 100%;margin-top: 8px;"
+                    options={pcoCountdownTypeOptions}
+                    value={timer.pcoCountdownType || "end_on_time"}
+                    on:change={(e) => (timer.pcoCountdownType = e.detail)}
+                />
+            </div>
+        </div>
     {:else if timer.type === "event"}
         <div class="timerbox" style="width: 100%;margin: 20px 0;overflow: visible;">
             <p style="border: none;min-height: unset;border-radius: 8px;" class="part">
@@ -314,7 +360,7 @@
     {/if}
 
     <InputRow arrow={timer.warn} bind:open={warningMenuOpened}>
-        <MaterialToggleSwitch label="timer.warn_early" style="width: 100%;" checked={timer.warn} defaultValue={false} on:change={(e) => updateTimerValue("warn", e.detail)} />
+        <MaterialToggleSwitch label="timer.warn_early" style="width: 100%;" checked={timer.warn} defaultValue={true} on:change={(e) => updateTimerValue("warn", e.detail)} />
 
         <div slot="menu">
             <MaterialNumberInput label="timer.warn_offset" value={timer.warnOffset || 30} min={1} defaultValue={30} max={Math.abs((timer.start ?? 300) - (timer.end || 0))} on:change={(e) => updateTimerValue("warnOffset", e.detail)} />
@@ -324,7 +370,7 @@
     </InputRow>
 
     <InputRow arrow={timer.overflow} bind:open={overflowMenuOpened}>
-        <MaterialToggleSwitch label="timer.overflow" style="width: 100%;" checked={timer.overflow} defaultValue={false} on:change={(e) => updateTimerValue("overflow", e.detail)} />
+        <MaterialToggleSwitch label="timer.overflow" style="width: 100%;" checked={timer.overflow} defaultValue={true} on:change={(e) => updateTimerValue("overflow", e.detail)} />
 
         <div slot="menu">
             <MaterialColorInput label="edit.color" value={timer.overflowColor || "#FF4136"} defaultValue="#FF4136" on:input={(e) => updateTimerValue("overflowColor", e.detail)} />

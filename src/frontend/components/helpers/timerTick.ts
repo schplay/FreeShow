@@ -57,13 +57,16 @@ export function startTimerById(id: string) {
 export function stopTimers() {
     // timeout so timer_end action don't clear at the same time as next timer tick starts
     setTimeout(() => {
-        // if (timeout) clearTimeout(timeout) // clear timeout (timer does not start again then...)
-        activeTimers.set([])
+        // preserve pco_live entries — they are managed by pcoLiveSync, not the regular timer tick
+        activeTimers.update((a) => a.filter((t) => t.pcoLive))
         customInterval = INTERVAL
     }, 50)
 }
 
 function increment(timer: { id: string; start: number; end: number; [key: string]: any }, i: number) {
+    // PCO Live timers update their own currentTime via pcoLiveSync — don't touch them here
+    if (timer.pcoLive) return timer
+
     if (timer.paused) {
         // has ended
         // if (timer.currentTime === timer.end && !timer.overflow) {
@@ -232,7 +235,7 @@ export function checkTimers() {
     if (timerCheckTimeout) clearTimeout(timerCheckTimeout)
 
     Object.entries(get(timers)).forEach(([id, timer]) => {
-        if (timer.type === "counter") return
+        if (timer.type === "counter" || timer.type === "pco_live") return
 
         const time = getCurrentTimerValue({ ...timer, overflow: true }, {}, new Date())
 
