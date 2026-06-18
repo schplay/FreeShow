@@ -20,6 +20,7 @@
     import Tip from "../../main/Tip.svelte"
     import PcoFolderTree from "./PcoFolderTree.svelte"
     import type { PCOFolderTreeNode } from "../../../../electron/contentProviders/planningCenter/request"
+    import { startRemoteController, stopRemoteController } from "../../../utils/remoteController"
 
     let ip = "localhost"
 
@@ -172,6 +173,20 @@
         { value: "online", label: "Always use online instance" }
     ]
 
+    // Remote Control
+
+    function toggleRemoteController(value: boolean) {
+        special.update((a) => ({ ...a, remoteController: value }))
+
+        if (value) {
+            popupData.set({ remoteController: true })
+            activePopup.set("connect")
+            startRemoteController()
+        } else {
+            stopRemoteController()
+        }
+    }
+
     // OBS Controller
 
     let obsWasDisabled = !$obsData.enabled
@@ -221,6 +236,25 @@
         {/if}
     </InputRow>
 {/each}
+
+<InputRow>
+    <MaterialButton
+        style="flex: 1;justify-content: space-between;"
+        disabled={!$special.remoteController}
+        on:click={() => {
+            popupData.set({ remoteController: true })
+            activePopup.set("connect")
+        }}
+    >
+        <span style="display: flex;align-items: center;justify-content: center;gap: 15px;">
+            <Icon id="web" size={1.1} />
+
+            Remote Clicker
+        </span>
+    </MaterialButton>
+
+    <MaterialToggleSwitch label="" checked={$special.remoteController} on:change={(e) => toggleRemoteController(e.detail)} />
+</InputRow>
 
 {#if !$providerConnections.planningcenter && (!$providerConnections.churchApps || cloudOnly.churchApps) && !$providerConnections.amazinglife}
     <!-- No provider connected - show connection options -->
