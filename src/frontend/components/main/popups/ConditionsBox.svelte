@@ -26,7 +26,9 @@
             { value: "is", label: translateText("conditions.is") },
             { value: "isNot", label: translateText("conditions.is_not") },
             { value: "has", label: translateText("conditions.has") },
-            { value: "hasNot", label: translateText("conditions.has_not") }
+            { value: "hasNot", label: translateText("conditions.has_not") },
+            { value: "isAbove", label: translateText("conditions.is_above") },
+            { value: "isBelow", label: translateText("conditions.is_below") }
         ],
         data: [{ value: "value", label: translateText("conditions.value") }] // { id: "state" }
     }
