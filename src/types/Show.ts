@@ -195,6 +195,7 @@ export interface Timer {
         serviceTypeId: string
         planId: string
         countdownType: "full_length" | "end_on_time" | "end_service"
+        autoFollow?: boolean
     }
 
     warn?: boolean

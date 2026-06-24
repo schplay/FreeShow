@@ -43,7 +43,10 @@
 
     // PCO Live: available plans loaded after PCO sync
     $: pcoAvailablePlans = ($contentProviderData.planningcenter?.availablePlans || []) as { planId: string; serviceTypeId: string; name: string; date: string }[]
-    $: pcoPlanOptions = pcoAvailablePlans.map((p) => ({ value: p.planId + "|" + p.serviceTypeId, label: `${p.name} (${new Date(p.date).toLocaleDateString()})` }))
+    $: pcoPlanOptions = [
+        { value: "auto", label: translateText("timer.follow_active_project") },
+        ...pcoAvailablePlans.map((p) => ({ value: p.planId + "|" + p.serviceTypeId, label: `${p.name} (${new Date(p.date).toLocaleDateString()})` }))
+    ]
 
     const pcoCountdownTypeOptions = [
         { value: "end_on_time", label: translateText("timer.end_on_time") },
@@ -52,8 +55,13 @@
     ]
 
     function updatePcoPlan(e: any) {
-        const [planId, serviceTypeId] = (e.detail || "").split("|")
-        timer.pco = { ...timer.pco, serviceTypeId: serviceTypeId || "", planId: planId || "", countdownType: timer.pco?.countdownType || "end_on_time" }
+        const val = e.detail || ""
+        if (val === "auto") {
+            timer.pco = { serviceTypeId: "", planId: "", countdownType: timer.pco?.countdownType || "end_on_time", autoFollow: true }
+        } else {
+            const [planId, serviceTypeId] = val.split("|")
+            timer.pco = { serviceTypeId: serviceTypeId || "", planId: planId || "", countdownType: timer.pco?.countdownType || "end_on_time", autoFollow: false }
+        }
     }
 
     // counter
@@ -173,7 +181,7 @@
         if (timer.type === "event") newTimer.event = timer.event
         else if (timer.type === "clock") newTimer.time = timer.time || "12:00"
         else if (timer.type === "pco_live") {
-            newTimer.pco = { serviceTypeId: timer.pco?.serviceTypeId || "", planId: timer.pco?.planId || "", countdownType: timer.pco?.countdownType || "end_on_time" }
+            newTimer.pco = { serviceTypeId: timer.pco?.serviceTypeId || "", planId: timer.pco?.planId || "", countdownType: timer.pco?.countdownType || "end_on_time", autoFollow: timer.pco?.autoFollow !== false }
         } else {
             newTimer.start = timer.start === undefined ? 300 : Number(timer.start)
             newTimer.end = timer.end === undefined ? 0 : Number(timer.end)
@@ -321,7 +329,7 @@
                         label="Service plan"
                         style="width: 100%;"
                         options={pcoPlanOptions}
-                        value={(timer.pco?.planId && timer.pco?.serviceTypeId) ? timer.pco.planId + "|" + timer.pco.serviceTypeId : ""}
+                        value={timer.pco?.autoFollow !== false ? "auto" : (timer.pco?.planId && timer.pco?.serviceTypeId) ? timer.pco.planId + "|" + timer.pco.serviceTypeId : "auto"}
                         on:change={updatePcoPlan}
                     />
                 {/if}

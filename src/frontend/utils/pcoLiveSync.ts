@@ -3,7 +3,7 @@ import { get } from "svelte/store"
 import { STAGE } from "../../types/Channels"
 import { Main } from "../../types/IPC/Main"
 import type { Timer } from "../../types/Show"
-import { activeTimers, timers } from "../stores"
+import { activeProject, activeTimers, contentProviderData, timers } from "../stores"
 import { requestMain } from "../IPC/main"
 import { send } from "./request"
 
@@ -58,13 +58,25 @@ const prevTimerPlanKey = new Map<string, string>() // tracks last known serviceT
 let activePcoTimerIds: string[] = []
 let lastTimerKey = ""
 
+function resolveTimerPlan(timer: Timer): { serviceTypeId: string; planId: string } | null {
+    if (!timer.pco) return null
+    if (!timer.pco.autoFollow) {
+        if (!timer.pco.serviceTypeId || !timer.pco.planId) return null
+        return { serviceTypeId: timer.pco.serviceTypeId, planId: timer.pco.planId }
+    }
+    const activeProjId = get(activeProject)
+    if (!activeProjId) return null
+    const plans = (get(contentProviderData) as any)?.planningcenter?.availablePlans as { planId: string; serviceTypeId: string }[] | undefined
+    return plans?.find((p) => p.planId === activeProjId) ?? null
+}
+
 export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
-    const pcoTimers = Object.entries(allTimers).filter(([, t]) => t.type === "pco_live" && t.pco?.serviceTypeId && t.pco?.planId)
+    const pcoTimers = Object.entries(allTimers).filter(([, t]) => t.type === "pco_live" && t.pco && (t.pco.autoFollow || (t.pco.serviceTypeId && t.pco.planId)))
 
     const newIds = pcoTimers.map(([id]) => id).sort()
-    // Include plan and countdown type so any config change triggers re-init
+    // Include resolved plan and countdown type so any config change triggers re-init
     const newKey = pcoTimers
-        .map(([id, t]) => `${id}:${t.pco?.serviceTypeId}:${t.pco?.planId}:${t.pco?.countdownType ?? ""}`)
+        .map(([id, t]) => { const p = resolveTimerPlan(t); return `${id}:${p?.serviceTypeId ?? ""}:${p?.planId ?? ""}:${t.pco?.countdownType ?? ""}` })
         .sort()
         .join(",")
 
@@ -75,7 +87,8 @@ export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
     // Only clear cache for timers whose plan changed — not for countdown-type-only changes,
     // which would wipe pusherLength and cause the display to show 00:00.
     pcoTimers.forEach(([id, t]) => {
-        const planKey = `${t.pco?.serviceTypeId}:${t.pco?.planId}`
+        const plan = resolveTimerPlan(t)
+        const planKey = `${plan?.serviceTypeId ?? ""}:${plan?.planId ?? ""}`
         if (prevTimerPlanKey.get(id) !== planKey) liveCache.delete(id)
         prevTimerPlanKey.set(id, planKey)
     })
@@ -235,10 +248,12 @@ function subscribePusherChannel(timerId: string, liveChannel: string) {
 async function pollTimer(id: string) {
     const allTimers = get(timers)
     const timer = allTimers[id] as Timer | undefined
-    if (!timer?.pco?.serviceTypeId || !timer?.pco?.planId) return
+    if (!timer) return
+    const plan = resolveTimerPlan(timer)
+    if (!plan?.serviceTypeId || !plan?.planId) return
 
     try {
-        const data = await requestMain(Main.PCO_LIVE_GET, { serviceTypeId: timer.pco.serviceTypeId, planId: timer.pco.planId })
+        const data = await requestMain(Main.PCO_LIVE_GET, { serviceTypeId: plan.serviceTypeId, planId: plan.planId })
 
         // Capture after await so we preserve any pusherLength set during the request
         const existing = liveCache.get(id)

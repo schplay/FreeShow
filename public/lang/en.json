@@ -1211,6 +1211,7 @@
         "line": "Line",
         "mask": "Mask",
         "pco_live": "PCO Live",
+        "follow_active_project": "Follow active project",
         "end_on_time": "End Item on Time",
         "full_length": "Full Item Length",
         "end_service": "End Service on Time",
