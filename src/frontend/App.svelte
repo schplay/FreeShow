@@ -22,8 +22,6 @@
     import { focusArea, logerror, mainClick, toggleRemoteStream } from "./utils/common"
     import { keydown } from "./utils/shortcuts"
     import { startup } from "./utils/startup"
-    import { initPcoLiveSync } from "./utils/pcoLiveSync"
-
     startup()
 
     $: isWindows = !$currentWindow && $os.platform === "win32"
@@ -33,7 +31,6 @@
     // countdown timer tick
     $: if ($activeTimers.length) startTimer()
     $: if (Object.keys($timers).length) checkTimers()
-    $: if ($timers) initPcoLiveSync($timers)
 
     // check for show event
     $: if (Object.keys($events).length) startEventTimer()

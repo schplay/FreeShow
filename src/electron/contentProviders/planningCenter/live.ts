@@ -72,11 +72,10 @@ export async function pcoGetLiveData(serviceTypeId: string, planId: string): Pro
     // Live resource is a singleton — endpoint is live/current_item_time, NOT live/{id}/current_item_time
     const itemTimeList = await pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans/${planId}/live/current_item_time` })
 
-    if (!itemTimeList?.length) return { liveId, liveChannel, orgId, liveStartAt: null, liveEndAt: null, length: null, isPreService: false, serviceStartAt, serviceEndAt }
+    const noItemTime = { liveId, liveChannel, orgId, liveStartAt: null, liveEndAt: null, length: null, isPreService: false, serviceStartAt, serviceEndAt }
 
-    const itemTime = itemTimeList[0]
-    if (!itemTime?.attributes) return { liveId, liveChannel, orgId, liveStartAt: null, liveEndAt: null, length: null, isPreService: false, serviceStartAt, serviceEndAt }
-    if (itemTime.attributes.exclude) return { liveId, liveChannel, orgId, liveStartAt: null, liveEndAt: null, length: null, isPreService: false, serviceStartAt, serviceEndAt }
+    const itemTime = itemTimeList?.[0]
+    if (!itemTimeList?.length || !itemTime?.attributes || itemTime.attributes.exclude) return noItemTime
 
     const rawLength = itemTime.attributes.length
     const parsedLength = rawLength != null && !isNaN(Number(rawLength)) ? Number(rawLength) : null

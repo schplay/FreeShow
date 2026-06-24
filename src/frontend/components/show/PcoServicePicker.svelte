@@ -5,6 +5,7 @@
     import { requestMain } from "../../IPC/main"
     import Icon from "../helpers/Icon.svelte"
     import PcoServiceTreeNodes from "./PcoServiceTreeNodes.svelte"
+    import { translateText } from "../../utils/language"
 
     const dispatch = createEventDispatcher<{ select: { serviceTypeId: string; planId: string }; close: void }>()
 
@@ -55,7 +56,7 @@
         {#if loading}
             <p class="status">Loading…</p>
         {:else if fetchError || !nodes.length}
-            <p class="status empty">No upcoming services found.</p>
+            <p class="status empty">{translateText("timer.no_upcoming_services_found")}</p>
         {:else}
             <PcoServiceTreeNodes {nodes} {expanded} on:toggle={(e) => { if (expanded.has(e.detail)) expanded.delete(e.detail); else expanded.add(e.detail); expanded = expanded }} on:select={onSelect} />
         {/if}

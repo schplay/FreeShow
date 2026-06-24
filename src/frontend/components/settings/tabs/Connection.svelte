@@ -319,9 +319,9 @@
             <MaterialButton
                 style="flex: 1;"
                 on:click={() => updateProvider("planningcenter", "selectedFolderIds", [])}
-                title="Clear selection to sync all services"
+                title="settings.clear_pco_folder_selection"
             >
-                Clear selection (sync all)
+                <T id="settings.clear_pco_folder_selection" />
             </MaterialButton>
         </InputRow>
         <div class="folder-tree-container">

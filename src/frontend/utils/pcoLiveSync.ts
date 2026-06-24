@@ -59,12 +59,12 @@ let activePcoTimerIds: string[] = []
 let lastTimerKey = ""
 
 export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
-    const pcoTimers = Object.entries(allTimers).filter(([, t]) => t.type === "pco_live" && t.pcoServiceTypeId && t.pcoPlanId)
+    const pcoTimers = Object.entries(allTimers).filter(([, t]) => t.type === "pco_live" && t.pco?.serviceTypeId && t.pco?.planId)
 
     const newIds = pcoTimers.map(([id]) => id).sort()
     // Include plan and countdown type so any config change triggers re-init
     const newKey = pcoTimers
-        .map(([id, t]) => `${id}:${t.pcoServiceTypeId}:${t.pcoPlanId}:${t.pcoCountdownType ?? ""}`)
+        .map(([id, t]) => `${id}:${t.pco?.serviceTypeId}:${t.pco?.planId}:${t.pco?.countdownType ?? ""}`)
         .sort()
         .join(",")
 
@@ -75,7 +75,7 @@ export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
     // Only clear cache for timers whose plan changed — not for countdown-type-only changes,
     // which would wipe pusherLength and cause the display to show 00:00.
     pcoTimers.forEach(([id, t]) => {
-        const planKey = `${t.pcoServiceTypeId}:${t.pcoPlanId}`
+        const planKey = `${t.pco?.serviceTypeId}:${t.pco?.planId}`
         if (prevTimerPlanKey.get(id) !== planKey) liveCache.delete(id)
         prevTimerPlanKey.set(id, planKey)
     })
@@ -146,7 +146,7 @@ function tickPcoTimers() {
                 // REST API current_item_time.length is unreliable (may return 0).
                 const effectiveLength = cached.pusherLength ?? cached.length
 
-                if (timer.pcoCountdownType === "end_service") {
+                if (timer.pco?.countdownType === "end_service") {
                     if (cached.serviceEndAt) {
                         currentTime = Math.round((cached.serviceEndAt.getTime() - now) / 1000)
                     }
@@ -235,10 +235,10 @@ function subscribePusherChannel(timerId: string, liveChannel: string) {
 async function pollTimer(id: string) {
     const allTimers = get(timers)
     const timer = allTimers[id] as Timer | undefined
-    if (!timer?.pcoServiceTypeId || !timer?.pcoPlanId) return
+    if (!timer?.pco?.serviceTypeId || !timer?.pco?.planId) return
 
     try {
-        const data = await requestMain(Main.PCO_LIVE_GET, { serviceTypeId: timer.pcoServiceTypeId, planId: timer.pcoPlanId })
+        const data = await requestMain(Main.PCO_LIVE_GET, { serviceTypeId: timer.pco.serviceTypeId, planId: timer.pco.planId })
 
         // Capture after await so we preserve any pusherLength set during the request
         const existing = liveCache.get(id)

@@ -83,7 +83,7 @@
         counter: "timer.from_to",
         clock: "timer.to_time",
         event: "timer.to_event",
-        pco_live: "PCO Live"
+        pco_live: "timer.pco_live"
     }
 
     function keydown(e: KeyboardEvent) {
@@ -117,11 +117,7 @@
             {#if i === 0 && list.length}
                 <h5><T id="remote.project" /></h5>
             {:else if title && i > 0}
-                {#if title === "pco_live"}
-                    <h5>PCO Live</h5>
-                {:else}
-                    <h5><T id={timerTypeNames[title]} /></h5>
-                {/if}
+                <h5><T id={timerTypeNames[title]} /></h5>
             {/if}
 
             <SelectElem id="global_timer" data={timer} draggable={!onlyPlaying} selectable={!onlyPlaying}>

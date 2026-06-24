@@ -2,6 +2,7 @@
     import { createEventDispatcher } from "svelte"
     import type { PCOFolderTreeNode } from "../../../electron/contentProviders/planningCenter/request"
     import Icon from "../helpers/Icon.svelte"
+    import { translateText } from "../../utils/language"
 
     export let nodes: PCOFolderTreeNode[]
     export let expanded: Set<string>
@@ -40,7 +41,7 @@
         {#if expanded.has(node.id) && node.children.length}
             <svelte:self nodes={node.children} {expanded} depth={depth + 1} on:toggle={forwardToggle} on:select={forwardSelect} />
         {:else if expanded.has(node.id)}
-            <div class="no-plans" style="padding-inline-start: {(depth + 1) * 16 + 28}px">No upcoming services</div>
+            <div class="no-plans" style="padding-inline-start: {(depth + 1) * 16 + 28}px">{translateText("timer.no_upcoming_services")}</div>
         {/if}
     {:else if node.type === "plan"}
         <button class="row plan-row" style="padding-inline-start: {depth * 16 + 28}px" on:click={() => dispatch("select", node)}>

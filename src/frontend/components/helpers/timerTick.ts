@@ -10,6 +10,7 @@ import { customActionActivation, runAction } from "../actions/actions"
 import { sortByClosestMatch } from "../actions/apiHelper"
 import { getCurrentTimerValue, getTimerDynamicValue, playPauseGlobal } from "../drawer/timers/timers"
 import { getDynamicValue } from "../edit/scripts/itemHelpers"
+import { initPcoLiveSync } from "../../utils/pcoLiveSync"
 import { clone, keysToID, sortByTime } from "./array"
 import { loadShows } from "./setShow"
 import { checkNextAfterMedia } from "./showActions"
@@ -236,6 +237,8 @@ function convertEventAction(action) {
 let timerCheckTimeout: NodeJS.Timeout | null = null
 export function checkTimers() {
     if (timerCheckTimeout) clearTimeout(timerCheckTimeout)
+
+    initPcoLiveSync(get(timers))
 
     Object.entries(get(timers)).forEach(([id, timer]) => {
         if (timer.type === "counter" || timer.type === "pco_live") return

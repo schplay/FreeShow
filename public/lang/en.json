@@ -1209,7 +1209,13 @@
         "edit": "Edit",
         "create": "Create",
         "line": "Line",
-        "mask": "Mask"
+        "mask": "Mask",
+        "pco_live": "PCO Live",
+        "end_on_time": "End Item on Time",
+        "full_length": "Full Item Length",
+        "end_service": "End Service on Time",
+        "no_upcoming_services": "No upcoming services",
+        "no_upcoming_services_found": "No upcoming services found."
     },
     "clock": {
         "type": "Type",
@@ -1412,6 +1418,7 @@
         "content_provider": "Content provider",
         "connect_to": "Connect to $1",
         "disconnect_from": "Disconnect from $1",
+        "clear_pco_folder_selection": "Clear selection (sync all)",
         "sync_categories_tip": "Select which categories to upload as songs",
         "reset_all": "Reset everything",
         "reset_theme": "Reset theme",

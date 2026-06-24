@@ -110,7 +110,7 @@
         openProject(id, !e.detail.alt)
     }
 
-    function getProjectFolderId(projectId: string): string {
+    function getPcoServiceTypeId(projectId: string): string {
         const plans = $contentProviderData?.planningcenter?.availablePlans as { planId: string; serviceTypeId: string }[] | undefined
         return plans?.find((p) => p.planId === projectId)?.serviceTypeId || ""
     }
@@ -188,8 +188,8 @@
                                         <MaterialButton style="width: 100%;padding: 0.08rem 0.65rem;font-weight: normal;" title="actions.id_select_project: <b>{project.name}</b>" on:click={(e) => open(e, project.id)} class="context #project_button{isReadOnly ? '_readonly' : ''}" isActive={$activeProject === project.id} tab>
                                             <Icon id={$projects[project.id]?.archived ? "archive" : "project"} white={$projects[project.id]?.archived} />
                                             <HiddenInput value={project.name} id={"project_" + project.id} on:edit={(e) => rename(project.id, e.detail.value)} bind:edit={editActive} allowEdit={!isReadOnly} />
-                                            {#if getProjectFolderId(project.id) && !isReadOnly}
-                                                <button class="pco-refresh" title="Sync with Planning Center" on:click={(e) => refreshPco(e, getProjectFolderId(project.id), project.id)}>
+                                            {#if getPcoServiceTypeId(project.id) && !isReadOnly}
+                                                <button class="pco-refresh" title="Sync with Planning Center" on:click={(e) => refreshPco(e, getPcoServiceTypeId(project.id), project.id)}>
                                                     <Icon id="refresh" size={0.75} white />
                                                 </button>
                                             {/if}

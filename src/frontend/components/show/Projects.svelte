@@ -4,7 +4,7 @@
     import { Main } from "../../../types/IPC/Main"
     import type { Project, Tree } from "../../../types/Projects"
     import { sendMain } from "../../IPC/main"
-    import { activeProject, activeRename, contentProviderData, dictionary, drawer, editingProjectTemplate, focusMode, folders, openedFolders, projects, projectTemplates, projectView, showRecentlyUsedProjects, sorted, special } from "../../stores"
+    import { activeProject, activeRename, contentProviderData, dictionary, drawer, editingProjectTemplate, focusMode, folders, openedFolders, projects, projectTemplates, projectView, providerConnections, showRecentlyUsedProjects, sorted, special } from "../../stores"
     import { translateText } from "../../utils/language"
     import { getAccess } from "../../utils/profile"
     import { exportProject } from "../export/project"
@@ -520,9 +520,11 @@
                         </div>
                     </MaterialButton>
 
-                    <MaterialButton variant="outlined" icon="calendar" title="Planning Center" on:click={openPcoPicker} white>
-                        Planning Center
-                    </MaterialButton>
+                    {#if $providerConnections.planningcenter}
+                        <MaterialButton variant="outlined" icon="list" title="Planning Center" on:click={openPcoPicker} white>
+                            Planning Center
+                        </MaterialButton>
+                    {/if}
                 </div>
             {/if}
 
