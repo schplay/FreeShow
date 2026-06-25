@@ -351,17 +351,7 @@ export interface MainReturnPayloads {
     [Main.PROVIDER_DISCONNECT]: { success: boolean }
     [Main.PROVIDER_FETCH_FOLDERS]: Promise<PCOFolderTreeNode[]>
     [Main.PCO_FETCH_SERVICE_TREE]: Promise<PCOFolderTreeNode[]>
-    [Main.PCO_LIVE_GET]: Promise<{
-        liveId: string | null
-        liveChannel: string | null
-        orgId: string | null
-        liveStartAt: string | null
-        liveEndAt: string | null
-        length: number | null
-        isPreService: boolean
-        serviceStartAt: string | null
-        serviceEndAt: string | null
-    } | null>
+    [Main.PCO_LIVE_GET]: Promise<{ liveId: string | null; liveChannel: string | null; orgId: string | null; liveStartAt: string | null; liveEndAt: string | null; length: number | null; isPreService: boolean; serviceStartAt: string | null; serviceEndAt: string | null } | null>
     [Main.PCO_PUSHER_AUTH]: Promise<{ auth: string; channel_data?: string } | null>
     // Content Library
     [Main.GET_CONTENT_PROVIDERS]: { providerId: ContentProviderId; displayName: string; hasContentLibrary: boolean }[]

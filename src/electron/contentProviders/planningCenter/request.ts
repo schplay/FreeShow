@@ -265,58 +265,8 @@ export async function pcoRequest(data: PCORequestData, attempt = 0): Promise<any
 
 const ONE_WEEK_MS = 604800000
 
-export async function pcoFetchFolderTree(): Promise<PCOFolderTreeNode[]> {
+async function buildPcoTree(includePlans: boolean): Promise<PCOFolderTreeNode[]> {
     const rawFolders = await pcoRequest({ scope: "services", endpoint: "folders" })
-    if (!rawFolders?.length) return []
-
-    // Build folder hierarchy from the folders flat list (parent relationship IS populated for folders)
-    const folderMap = new Map<string, PCOFolderTreeNode>()
-    rawFolders.forEach((f: PCOFolder) => folderMap.set(f.id, { id: f.id, name: f.attributes.name, type: "folder", children: [] }))
-
-    const rootNodes: PCOFolderTreeNode[] = []
-    rawFolders.forEach((f: PCOFolder) => {
-        const parentId = f.relationships?.parent?.data?.id
-        const node = folderMap.get(f.id)!
-        if (parentId && folderMap.has(parentId)) folderMap.get(parentId)!.children.push(node)
-        else rootNodes.push(node)
-    })
-
-    // Fetch service types per-folder — the flat service_types endpoint does not reliably
-    // include the parent relationship, so we query each folder directly instead
-    const serviceTypeIdsInFolders = new Set<string>()
-    await Promise.all(
-        rawFolders.map(async (f: PCOFolder) => {
-            const stList = await pcoRequest({ scope: "services", endpoint: `folders/${f.id}/service_types` })
-            if (!stList) return
-            stList.forEach((st: ServiceType) => {
-                if (!st?.id) return
-                serviceTypeIdsInFolders.add(st.id)
-                folderMap.get(f.id)?.children.push({ id: st.id, name: st.attributes.name, type: "service_type", children: [] })
-            })
-        })
-    )
-
-    // Append any root-level service types (not in any folder) at the end
-    const allServiceTypes = await pcoRequest({ scope: "services", endpoint: "service_types" })
-    if (allServiceTypes) {
-        allServiceTypes.forEach((st: ServiceType) => {
-            if (!st?.id || serviceTypeIdsInFolders.has(st.id)) return
-            rootNodes.push({ id: st.id, name: st.attributes.name, type: "service_type", children: [] })
-        })
-    }
-
-    return rootNodes
-}
-
-async function fetchAllFuturePlans(serviceTypeId: string): Promise<PCOFolderTreeNode[]> {
-    const plans = await pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans`, params: { order: "sort_date", filter: "future", per_page: "25" } })
-    if (!plans?.length) return []
-    return plans.filter((p: Plan) => p?.id).map((p: Plan) => ({ id: p.id, name: p.attributes.title || getDateTitle(p.attributes.sort_date), type: "plan" as const, serviceTypeId, children: [] }))
-}
-
-export async function pcoFetchServiceTree(): Promise<PCOFolderTreeNode[]> {
-    const rawFolders = await pcoRequest({ scope: "services", endpoint: "folders" })
-
     const folderMap = new Map<string, PCOFolderTreeNode>()
     const rootNodes: PCOFolderTreeNode[] = []
 
@@ -341,7 +291,7 @@ export async function pcoFetchServiceTree(): Promise<PCOFolderTreeNode[]> {
                     stList.map(async (st: ServiceType) => {
                         if (!st?.id) return
                         serviceTypeIdsInFolders.add(st.id)
-                        const planNodes = await fetchAllFuturePlans(st.id)
+                        const planNodes = includePlans ? await fetchAllFuturePlans(st.id) : []
                         folderMap.get(f.id)?.children.push({ id: st.id, name: st.attributes.name, type: "service_type", children: planNodes })
                     })
                 )
@@ -354,13 +304,27 @@ export async function pcoFetchServiceTree(): Promise<PCOFolderTreeNode[]> {
         await Promise.all(
             allServiceTypes.map(async (st: ServiceType) => {
                 if (!st?.id || serviceTypeIdsInFolders.has(st.id)) return
-                const planNodes = await fetchAllFuturePlans(st.id)
+                const planNodes = includePlans ? await fetchAllFuturePlans(st.id) : []
                 rootNodes.push({ id: st.id, name: st.attributes.name, type: "service_type", children: planNodes })
             })
         )
     }
 
     return rootNodes
+}
+
+export async function pcoFetchFolderTree(): Promise<PCOFolderTreeNode[]> {
+    return buildPcoTree(false)
+}
+
+async function fetchAllFuturePlans(serviceTypeId: string): Promise<PCOFolderTreeNode[]> {
+    const plans = await pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans`, params: { order: "sort_date", filter: "future", per_page: "25" } })
+    if (!plans?.length) return []
+    return plans.filter((p: Plan) => p?.id).map((p: Plan) => ({ id: p.id, name: p.attributes.title || getDateTitle(p.attributes.sort_date), type: "plan" as const, serviceTypeId, children: [] }))
+}
+
+export async function pcoFetchServiceTree(): Promise<PCOFolderTreeNode[]> {
+    return buildPcoTree(true)
 }
 
 export async function pcoLoadSinglePlan(serviceTypeId: string, planId: string): Promise<void> {

@@ -69,15 +69,15 @@ export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
 
     const pcoTimers = Object.entries(allTimers).filter(([, t]) => t.type === "pco_live" && t.pco)
 
-    const newIds = pcoTimers.map(([id]) => id).sort()
-    // Include resolved plan and countdown type so any config change triggers re-init
-    const newKey = pcoTimers
-        .map(([id, t]) => {
-            const p = resolveTimerPlan(t)
-            return `${id}:${p?.serviceTypeId ?? ""}:${p?.planId ?? ""}:${t.pco?.countdownType ?? ""}`
-        })
-        .sort()
-        .join(",")
+    const newIds: string[] = []
+    const keyParts: string[] = []
+    for (const [id, t] of pcoTimers) {
+        newIds.push(id)
+        const p = resolveTimerPlan(t)
+        keyParts.push(`${id}:${p?.serviceTypeId ?? ""}:${p?.planId ?? ""}:${t.pco?.countdownType ?? ""}`)
+    }
+    newIds.sort()
+    const newKey = keyParts.sort().join(",")
 
     if (newKey === lastTimerKey) return // nothing changed
     lastTimerKey = newKey
@@ -246,7 +246,7 @@ async function pollTimer(id: string) {
     try {
         const data = await requestMain(Main.PCO_LIVE_GET, { serviceTypeId: plan.serviceTypeId, planId: plan.planId })
 
-        const parseDate = (d: any) => d ? new Date(d) : null
+        const parseDate = (d: any) => (d ? new Date(d) : null)
         liveCache.set(id, {
             liveId: data?.liveId ?? null,
             liveChannel: data?.liveChannel ?? null,

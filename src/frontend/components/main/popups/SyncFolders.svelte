@@ -4,22 +4,17 @@
     import { Main } from "../../../../types/IPC/Main"
     import { requestMain } from "../../../IPC/main"
     import { contentProviderData } from "../../../stores"
-    import FolderTree from "./SyncFoldersPcoFolderTree.svelte"
     import Center from "../../system/Center.svelte"
     import Loader from "../Loader.svelte"
     import Tip from "../Tip.svelte"
+    import FolderTree from "./SyncFoldersPcoFolderTree.svelte"
 
     let folderTree: PCOFolderTreeNode[] | null = null
     let loading = true
 
     onMount(async () => {
-        try {
-            folderTree = (await requestMain(Main.PROVIDER_FETCH_FOLDERS, { providerId: "planningcenter" })) ?? null
-        } catch (e) {
-            console.error(e)
-        } finally {
-            loading = false
-        }
+        folderTree = (await requestMain(Main.PROVIDER_FETCH_FOLDERS, { providerId: "planningcenter" })) ?? null
+        loading = false
     })
 
     function updateProvider(key: string, value: any) {
@@ -50,23 +45,16 @@
 
         let nextSelected: string[]
         if (currentSelected.length === 0) {
-            if (!checked) {
-                nextSelected = allIds.filter((x) => x !== id)
-            } else {
-                nextSelected = []
-            }
+            if (!checked) nextSelected = allIds.filter((a) => a !== id)
+            else nextSelected = []
         } else {
-            if (checked) {
-                nextSelected = [...currentSelected, id]
-            } else {
-                nextSelected = currentSelected.filter((x) => x !== id)
-            }
+            if (checked) nextSelected = [...currentSelected, id]
+            else nextSelected = currentSelected.filter((a) => a !== id)
         }
 
-        const allSelected = allIds.every((x) => nextSelected.includes(x))
-        if (allSelected) {
-            nextSelected = []
-        }
+        // set to empty (sync all) if all folders are selected
+        const allSelected = allIds.every((a) => nextSelected.includes(a))
+        if (allSelected) nextSelected = []
 
         updateProvider("syncFolderIds", nextSelected)
     }
