@@ -55,8 +55,8 @@ export class PlanningCenterProvider extends ContentProvider<PCOScopes, PCOAuthDa
         return pcoRequest(data)
     }
 
-    async loadServices(data?: { selectedFolderIds?: string[] }): Promise<void> {
-        return pcoLoadServices(data?.selectedFolderIds)
+    async loadServices(data?: { syncFolderIds?: string[] }): Promise<void> {
+        return pcoLoadServices(data?.syncFolderIds)
     }
 
     async fetchFolderTree(): Promise<PCOFolderTreeNode[]> {
@@ -79,9 +79,9 @@ export class PlanningCenterProvider extends ContentProvider<PCOScopes, PCOAuthDa
         return pcoGetPusherAuth(socketId, channelName, serviceTypeId)
     }
 
-    async startupLoad(scope: PCOScopes, data?: { selectedFolderIds?: string[] }): Promise<void> {
+    async startupLoad(scope: PCOScopes, data?: { syncFolderIds?: string[] }): Promise<void> {
         pcoInitialize()
-        return pcoStartupLoad(scope, data?.selectedFolderIds)
+        return pcoStartupLoad(scope, data?.syncFolderIds)
     }
 
     protected handleAuthCallback(_req: any, _res: any): void {

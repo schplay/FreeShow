@@ -201,14 +201,7 @@ export const mainResponses: MainResponses = {
             console.error("[PCO] loadSinglePlan threw:", err)
         }
     },
-    [Main.PCO_LIVE_GET]: async (data) => {
-        try {
-            return await ContentProviderRegistry.getPcoLiveData(data.serviceTypeId, data.planId)
-        } catch (err) {
-            console.error("[PCO] getPcoLiveData threw:", err)
-            return null
-        }
-    },
+    [Main.PCO_LIVE_GET]: (data) => ContentProviderRegistry.getPcoLiveData(data.serviceTypeId, data.planId).catch(() => null),
     [Main.PCO_PUSHER_AUTH]: async (data) => {
         return ContentProviderRegistry.getPcoPusherAuth(data.socketId, data.channelName, data.serviceTypeId)
     },

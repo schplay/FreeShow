@@ -28,11 +28,7 @@ export function startTimer() {
 
     if (timeout) clearTimeout(timeout)
     timeout = setTimeout(() => {
-        const newActiveTimers = clone(get(activeTimers)).map(increment)
-
-        // Update store: apply incremented non-PCO values, but preserve current PCO values
-        // from the live store to avoid overwriting pcoLiveSync updates with a stale clone.
-        activeTimers.update((current) => newActiveTimers.map((t) => t.pcoLive ? (current.find((c) => c.id === t.id) ?? t) : t))
+        activeTimers.update((timers) => clone(timers).map(increment))
 
         // send(OUTPUT, ["ACTIVE_TIMERS"], get(activeTimers))
         send(STAGE, ["ACTIVE_TIMERS"], get(activeTimers))
@@ -61,14 +57,14 @@ export function startTimerById(id: string) {
 export function stopTimers() {
     // timeout so timer_end action don't clear at the same time as next timer tick starts
     setTimeout(() => {
-        // preserve pco_live entries — they are managed by pcoLiveSync, not the regular timer tick
+        // don't clear pcoLive entries
         activeTimers.update((a) => a.filter((t) => t.pcoLive))
         customInterval = INTERVAL
     }, 50)
 }
 
 function increment(timer: { id: string; start: number; end: number; [key: string]: any }, i: number) {
-    // PCO Live timers update their own currentTime via pcoLiveSync — don't touch them here
+    // PCO Live timers update via pcoLiveSync
     if (timer.pcoLive) return timer
 
     if (timer.paused) {
@@ -81,8 +77,8 @@ function increment(timer: { id: string; start: number; end: number; [key: string
         return timer
     }
 
-    const startTime = timer.startDynamic !== undefined ? getTimerDynamicValue(timer.startDynamic) ?? 0 : timer.start || 0
-    const endTime = timer.endDynamic !== undefined ? getTimerDynamicValue(timer.endDynamic) ?? 0 : timer.end || 0
+    const startTime = timer.startDynamic !== undefined ? (getTimerDynamicValue(timer.startDynamic) ?? 0) : timer.start || 0
+    const endTime = timer.endDynamic !== undefined ? (getTimerDynamicValue(timer.endDynamic) ?? 0) : timer.end || 0
 
     if (startTime < endTime ? timer.currentTime >= endTime && timer.currentTime < endTime + 1 : timer.currentTime <= endTime && timer.currentTime > endTime - 1) {
         if (!timer.overflow) timer.paused = true

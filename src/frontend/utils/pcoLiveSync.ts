@@ -38,13 +38,8 @@ function parseActualStart(s: string | null | undefined): Date | null {
 }
 
 function serviceScheduleFallback(cached: LiveCacheEntry, now: number): number {
-    if (cached.serviceStartAt && cached.serviceStartAt.getTime() > now) {
-        return Math.round((cached.serviceStartAt.getTime() - now) / 1000)
-    }
-    if (cached.serviceEndAt) {
-        return Math.round((cached.serviceEndAt.getTime() - now) / 1000)
-    }
-    return 0
+    const target = cached.serviceStartAt && cached.serviceStartAt.getTime() > now ? cached.serviceStartAt : cached.serviceEndAt
+    return target ? Math.round((target.getTime() - now) / 1000) : 0
 }
 
 let tickInterval: ReturnType<typeof setInterval> | null = null
@@ -59,24 +54,28 @@ let activePcoTimerIds: string[] = []
 let lastTimerKey = ""
 
 function resolveTimerPlan(timer: Timer): { serviceTypeId: string; planId: string } | null {
-    if (!timer.pco) return null
-    if (!timer.pco.autoFollow) {
-        if (!timer.pco.serviceTypeId || !timer.pco.planId) return null
-        return { serviceTypeId: timer.pco.serviceTypeId, planId: timer.pco.planId }
-    }
+    const pco = timer.pco
+    if (!pco) return null
+    if (pco.serviceTypeId && pco.planId) return { serviceTypeId: pco.serviceTypeId, planId: pco.planId }
+
     const activeProjId = get(activeProject)
     if (!activeProjId) return null
-    const plans = (get(contentProviderData) as any)?.planningcenter?.availablePlans as { planId: string; serviceTypeId: string }[] | undefined
-    return plans?.find((p) => p.planId === activeProjId) ?? null
+    const plans = get(contentProviderData)?.planningcenter?.availablePlans
+    return plans?.find((p: any) => p.planId === activeProjId) ?? null
 }
 
 export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
-    const pcoTimers = Object.entries(allTimers).filter(([, t]) => t.type === "pco_live" && t.pco && (t.pco.autoFollow || (t.pco.serviceTypeId && t.pco.planId)))
+    if (!get(contentProviderData)?.planningcenter) return
+
+    const pcoTimers = Object.entries(allTimers).filter(([, t]) => t.type === "pco_live" && t.pco)
 
     const newIds = pcoTimers.map(([id]) => id).sort()
     // Include resolved plan and countdown type so any config change triggers re-init
     const newKey = pcoTimers
-        .map(([id, t]) => { const p = resolveTimerPlan(t); return `${id}:${p?.serviceTypeId ?? ""}:${p?.planId ?? ""}:${t.pco?.countdownType ?? ""}` })
+        .map(([id, t]) => {
+            const p = resolveTimerPlan(t)
+            return `${id}:${p?.serviceTypeId ?? ""}:${p?.planId ?? ""}:${t.pco?.countdownType ?? ""}`
+        })
         .sort()
         .join(",")
 
@@ -86,13 +85,15 @@ export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
 
     // Only clear cache for timers whose plan changed — not for countdown-type-only changes,
     // which would wipe pusherLength and cause the display to show 00:00.
-    pcoTimers.forEach(([id, t]) => {
+    for (const [id, t] of pcoTimers) {
         const plan = resolveTimerPlan(t)
         const planKey = `${plan?.serviceTypeId ?? ""}:${plan?.planId ?? ""}`
         if (prevTimerPlanKey.get(id) !== planKey) liveCache.delete(id)
         prevTimerPlanKey.set(id, planKey)
-    })
-    prevTimerPlanKey.forEach((_, id) => { if (!activePcoTimerIds.includes(id)) prevTimerPlanKey.delete(id) })
+    }
+    for (const id of prevTimerPlanKey.keys()) {
+        if (!activePcoTimerIds.includes(id)) prevTimerPlanKey.delete(id)
+    }
 
     if (!activePcoTimerIds.length) {
         stopPcoLiveSync()
@@ -100,13 +101,7 @@ export function initPcoLiveSync(allTimers: { [key: string]: Timer }) {
     }
 
     // Seed the activeTimers store with pco_live entries so the stage sees them
-    activeTimers.update((a) => {
-        const filtered = a.filter((t) => !t.pcoLive)
-        activePcoTimerIds.forEach((id) => {
-            filtered.push({ id, currentTime: 0, start: 0, end: 0, paused: false, pcoLive: true })
-        })
-        return filtered
-    })
+    activeTimers.update((a) => [...a.filter((t) => !t.pcoLive), ...activePcoTimerIds.map((id) => ({ id, currentTime: 0, start: 0, end: 0, paused: false, pcoLive: true }))])
 
     startTick()
     // One-time initial poll to get serviceStartAt/serviceEndAt and subscribe to Pusher.
@@ -144,35 +139,28 @@ function tickPcoTimers() {
 
     const now = Date.now()
     const allTimers = get(timers)
+    const getDiffSeconds = (targetMs: number) => Math.round((targetMs - now) / 1000)
 
     activeTimers.update((a) => {
-        activePcoTimerIds.forEach((id) => {
+        for (const id of activePcoTimerIds) {
             const timer = allTimers[id] as Timer | undefined
-            if (!timer) return
+            if (!timer) continue
 
             const cached = liveCache.get(id)
             let currentTime = 0
 
             if (cached) {
-                const isLive = !!cached.liveStartAt
-                // Pusher's goToPlanItemTime carries the correct scheduled length;
-                // REST API current_item_time.length is unreliable (may return 0).
                 const effectiveLength = cached.pusherLength ?? cached.length
+                const type = timer.pco?.countdownType
 
-                if (timer.pco?.countdownType === "end_service") {
-                    if (cached.serviceEndAt) {
-                        currentTime = Math.round((cached.serviceEndAt.getTime() - now) / 1000)
-                    }
-                } else if (!isLive || cached.isPreService) {
+                if (type === "end_service" && cached.serviceEndAt) {
+                    currentTime = getDiffSeconds(cached.serviceEndAt.getTime())
+                } else if (!cached.liveStartAt || cached.isPreService) {
                     currentTime = serviceScheduleFallback(cached, now)
-                } else if (cached.liveStartAt && effectiveLength != null && effectiveLength > 0) {
-                    const endMs = cached.liveStartAt.getTime() + effectiveLength * 1000
-                    currentTime = Math.round((endMs - now) / 1000)
-                } else {
-                    currentTime = 0
+                } else if (effectiveLength) {
+                    currentTime = getDiffSeconds(cached.liveStartAt.getTime() + effectiveLength * 1000)
                 }
 
-                // Mirror standard timer behaviour: clamp to 0 unless the timer has overflow enabled
                 if (currentTime < 0 && !timer.overflow) currentTime = 0
             }
 
@@ -182,7 +170,7 @@ function tickPcoTimers() {
             } else {
                 a.push({ id, currentTime, start: 0, end: 0, paused: false, pcoLive: true })
             }
-        })
+        }
         return a
     })
 
@@ -222,26 +210,29 @@ function subscribePusherChannel(timerId: string, liveChannel: string) {
             // Real service item — update cache directly from event, no API call needed.
             const pusherStart = parseActualStart(eventData?.actual_start)
             const pusherLen = typeof eventData?.length === "number" ? eventData.length : null
-            ids.forEach((id) => {
+            for (const id of ids) {
                 const entry = liveCache.get(id)
-                if (!entry) return
+                if (!entry) continue
                 if (pusherStart) entry.liveStartAt = pusherStart
                 if (pusherLen !== null) entry.pusherLength = pusherLen
                 entry.isPreService = false
-            })
+            }
             return
         }
 
         // Unknown event or goToPlanItemTime without item_id (pre-service state) —
         // do one recovery poll to resync isPreService and related fields.
-        ids.forEach((id) => {
+        for (const id of ids) {
             const pending = recoveryPollDebounce.get(id)
             if (pending) clearTimeout(pending)
-            recoveryPollDebounce.set(id, setTimeout(() => {
-                recoveryPollDebounce.delete(id)
-                pollTimer(id)
-            }, RECOVERY_POLL_DEBOUNCE_MS))
-        })
+            recoveryPollDebounce.set(
+                id,
+                setTimeout(() => {
+                    recoveryPollDebounce.delete(id)
+                    pollTimer(id)
+                }, RECOVERY_POLL_DEBOUNCE_MS)
+            )
+        }
     })
 }
 
@@ -255,18 +246,17 @@ async function pollTimer(id: string) {
     try {
         const data = await requestMain(Main.PCO_LIVE_GET, { serviceTypeId: plan.serviceTypeId, planId: plan.planId })
 
-        // Capture after await so we preserve any pusherLength set during the request
-        const existing = liveCache.get(id)
+        const parseDate = (d: any) => d ? new Date(d) : null
         liveCache.set(id, {
             liveId: data?.liveId ?? null,
             liveChannel: data?.liveChannel ?? null,
-            liveStartAt: data?.liveStartAt ? new Date(data.liveStartAt) : null,
-            liveEndAt: data?.liveEndAt ? new Date(data.liveEndAt) : null,
+            liveStartAt: parseDate(data?.liveStartAt),
+            liveEndAt: parseDate(data?.liveEndAt),
             length: data?.length ?? null,
-            pusherLength: existing?.pusherLength ?? null,
+            pusherLength: liveCache.get(id)?.pusherLength ?? null,
             isPreService: data?.isPreService ?? false,
-            serviceStartAt: data?.serviceStartAt ? new Date(data.serviceStartAt) : null,
-            serviceEndAt: data?.serviceEndAt ? new Date(data.serviceEndAt) : null
+            serviceStartAt: parseDate(data?.serviceStartAt),
+            serviceEndAt: parseDate(data?.serviceEndAt)
         })
 
         if (data?.liveChannel) subscribePusherChannel(id, data.liveChannel)

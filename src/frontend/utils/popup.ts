@@ -83,6 +83,8 @@ import UpdateManager from "../components/main/popups/UpdateManager.svelte"
 import Variable from "../components/main/popups/Variable.svelte"
 import { activePopup, popupData } from "../stores"
 import CleaningUtility from "../components/main/popups/CleaningUtility.svelte"
+import PcoServicePicker from "../components/main/popups/PcoServicePicker.svelte"
+import SyncFolders from "../components/main/popups/SyncFolders.svelte"
 
 export const popups: { [key in Popups]: ComponentType } = {
     initialize: Initialize,
@@ -164,7 +166,9 @@ export const popups: { [key in Popups]: ComponentType } = {
     timecode: Timecode,
     drawer_search_options: DrawerSearchOptions,
     template_info: TemplateInfo,
-    cleaning_utility: CleaningUtility
+    cleaning_utility: CleaningUtility,
+    pco_picker: PcoServicePicker,
+    sync_folders: SyncFolders
 }
 
 export function waitForPopupData(popupId: Popups): Promise<any> {

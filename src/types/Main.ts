@@ -445,6 +445,8 @@ export type Popups =
     | "drawer_search_options"
     | "template_info"
     | "cleaning_utility"
+    | "pco_picker"
+    | "sync_folders"
 
 export type DefaultProjectNames = "date" | "today" | "sunday" | "week" | "custom" | "blank"
 

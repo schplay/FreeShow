@@ -311,9 +311,7 @@ export async function pcoFetchFolderTree(): Promise<PCOFolderTreeNode[]> {
 async function fetchAllFuturePlans(serviceTypeId: string): Promise<PCOFolderTreeNode[]> {
     const plans = await pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans`, params: { order: "sort_date", filter: "future", per_page: "25" } })
     if (!plans?.length) return []
-    return plans
-        .filter((p: Plan) => p?.id)
-        .map((p: Plan) => ({ id: p.id, name: p.attributes.title || getDateTitle(p.attributes.sort_date), type: "plan" as const, serviceTypeId, children: [] }))
+    return plans.filter((p: Plan) => p?.id).map((p: Plan) => ({ id: p.id, name: p.attributes.title || getDateTitle(p.attributes.sort_date), type: "plan" as const, serviceTypeId, children: [] }))
 }
 
 export async function pcoFetchServiceTree(): Promise<PCOFolderTreeNode[]> {
@@ -366,10 +364,7 @@ export async function pcoFetchServiceTree(): Promise<PCOFolderTreeNode[]> {
 }
 
 export async function pcoLoadSinglePlan(serviceTypeId: string, planId: string): Promise<void> {
-    const [stList, planList] = await Promise.all([
-        pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}` }),
-        pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans/${planId}` })
-    ])
+    const [stList, planList] = await Promise.all([pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}` }), pcoRequest({ scope: "services", endpoint: `service_types/${serviceTypeId}/plans/${planId}` })])
 
     const serviceType = stList?.[0]
     const plan = planList?.[0]
@@ -395,8 +390,8 @@ export async function pcoLoadSinglePlan(serviceTypeId: string, planId: string): 
     })
 }
 
-function expandFolderIds(allFolders: PCOFolder[], selectedFolderIds: string[]): string[] {
-    const included = new Set<string>(selectedFolderIds)
+function expandFolderIds(allFolders: PCOFolder[], syncFolderIds: string[]): string[] {
+    const included = new Set<string>(syncFolderIds)
     let changed = true
     while (changed) {
         changed = false
@@ -411,28 +406,29 @@ function expandFolderIds(allFolders: PCOFolder[], selectedFolderIds: string[]): 
     return Array.from(included)
 }
 
-async function getServiceTypesForFolders(rawFolders: PCOFolder[], selectedFolderIds: string[]): Promise<ServiceType[]> {
-    const expandedIds = expandFolderIds(rawFolders, selectedFolderIds)
+async function getServiceTypesForFolders(rawFolders: PCOFolder[], syncFolderIds: string[]): Promise<ServiceType[]> {
+    const expandedIds = expandFolderIds(rawFolders, syncFolderIds)
     const results = await Promise.all(expandedIds.map((id) => pcoRequest({ scope: "services", endpoint: `folders/${id}/service_types` })))
     const seen = new Set<string>()
     return (results.flat() as ServiceType[]).filter((st) => st?.id && !seen.has(st.id) && !!seen.add(st.id))
 }
 
-export async function pcoLoadServices(selectedFolderIds?: string[]) {
+export async function pcoLoadServices(syncFolderIds?: string[]) {
     let serviceTypes: ServiceType[]
 
-    if (selectedFolderIds?.length) {
+    if (syncFolderIds?.length) {
         const rawFolders = await pcoRequest({ scope: "services", endpoint: "folders" })
         if (!rawFolders) {
             console.info("Could not fetch Planning Center folders")
             return
         }
-        serviceTypes = await getServiceTypesForFolders(rawFolders, selectedFolderIds)
+        serviceTypes = await getServiceTypesForFolders(rawFolders, syncFolderIds)
         if (!serviceTypes.length) {
             sendToMain(ToMain.ALERT, "No services found in the selected folders. Check your folder selection in Settings > Connection.")
             return
         }
     } else {
+        // sync all folders if no specific folders are selected
         const all = await fetchServiceTypes()
         if (!all) {
             console.info("No service types found in Planning Center")

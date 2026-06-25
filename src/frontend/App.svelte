@@ -22,6 +22,7 @@
     import { focusArea, logerror, mainClick, toggleRemoteStream } from "./utils/common"
     import { keydown } from "./utils/shortcuts"
     import { startup } from "./utils/startup"
+
     startup()
 
     $: isWindows = !$currentWindow && $os.platform === "win32"

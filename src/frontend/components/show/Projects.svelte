@@ -4,7 +4,7 @@
     import { Main } from "../../../types/IPC/Main"
     import type { Project, Tree } from "../../../types/Projects"
     import { sendMain } from "../../IPC/main"
-    import { activeProject, activeRename, contentProviderData, dictionary, drawer, editingProjectTemplate, focusMode, folders, openedFolders, projects, projectTemplates, projectView, providerConnections, showRecentlyUsedProjects, sorted, special } from "../../stores"
+    import { activePopup, activeProject, activeRename, contentProviderData, dictionary, drawer, editingProjectTemplate, focusMode, folders, openedFolders, projects, projectTemplates, projectView, providerConnections, showRecentlyUsedProjects, sorted, special } from "../../stores"
     import { translateText } from "../../utils/language"
     import { getAccess } from "../../utils/profile"
     import { exportProject } from "../export/project"
@@ -23,7 +23,6 @@
     import Autoscroll from "../system/Autoscroll.svelte"
     import DropArea from "../system/DropArea.svelte"
     import { getRecentlyUsedProjects, openProject } from "./project"
-    import PcoServicePicker from "./PcoServicePicker.svelte"
     import ProjectContentList from "./ProjectContentList.svelte"
     import ProjectList from "./ProjectList.svelte"
 
@@ -92,9 +91,7 @@
 
     $: projectActive = !$projectView && $activeProject !== null
     $: currentProject = $activeProject ? $projects[$activeProject] : null
-    $: currentProjectPcoFolderId = $activeProject
-        ? ($contentProviderData?.planningcenter?.availablePlans as { planId: string; serviceTypeId: string }[] | undefined)?.find((p) => p.planId === $activeProject)?.serviceTypeId
-        : undefined
+    $: currentProjectPcoFolderId = $activeProject ? ($contentProviderData?.planningcenter?.availablePlans as { planId: string; serviceTypeId: string }[] | undefined)?.find((p) => p.planId === $activeProject)?.serviceTypeId : undefined
 
     function createProject(folder = false) {
         let parent = interactedFolder || ($folders[currentProject?.parent || ""] ? currentProject?.parent || "/" : "/")
@@ -269,21 +266,6 @@
 
     let addMenuOpen = false
     $: if (projectActive) addMenuOpen = false
-    let showPcoPicker = false
-
-    function openPcoPicker() {
-        addMenuOpen = false
-        showPcoPicker = true
-    }
-
-    function onPcoServiceSelected(e: CustomEvent<{ serviceTypeId: string; planId: string }>) {
-        showPcoPicker = false
-        sendMain(Main.PCO_LOAD_PLAN, e.detail)
-    }
-
-    function refreshPcoProject(serviceTypeId: string, planId: string) {
-        sendMain(Main.PCO_LOAD_PLAN, { serviceTypeId, planId })
-    }
 
     let showProjectsOptions = false
     let showProjectDropdown = false
@@ -335,6 +317,17 @@
             return a
         })
     }
+
+    // PCO Live
+
+    function openPcoPicker() {
+        addMenuOpen = false
+        activePopup.set("pco_picker")
+    }
+
+    function refreshPcoProject(serviceTypeId: string, planId: string) {
+        sendMain(Main.PCO_LOAD_PLAN, { serviceTypeId, planId })
+    }
 </script>
 
 <svelte:window on:keydown={checkInput} on:mousedown={mousedown} on:dragenter={dragStart} on:dragstart={dragStart} on:dragend={dragEnd} on:drop={dragEnd} on:mouseup={dragEnd} />
@@ -361,10 +354,6 @@
                             {/if}
                         </p>
 
-                        {#if currentProject && currentProjectPcoFolderId && $activeProject}
-                            <MaterialButton style="width: 32px;height: 100%;padding: 0.3em 0.5em;opacity: 0.7;" title="Sync with Planning Center" icon="refresh" on:click={() => refreshPcoProject(currentProjectPcoFolderId || "", $activeProject || "")} white />
-                        {/if}
-
                         <div class="right context">
                             <MaterialButton style="width: 32px;height: 100%;padding: 0.3em 0.5em;border-bottom-right-radius: 10px;{showProjectDropdown ? '' : 'opacity: 0.8;'}" title="create_show.more_options" icon="more" on:click={() => (showProjectDropdown = !showProjectDropdown)} white={!showProjectDropdown}>
                                 <!-- prevent force "white" -->
@@ -374,6 +363,14 @@
                             {#if showProjectDropdown && currentProject}
                                 <!-- WIP use context menu style -->
                                 <div class="projectDropdown" transition:fade={{ duration: 100 }} role="none" on:click={() => (showProjectDropdown = false)}>
+                                    {#if currentProjectPcoFolderId && $activeProject}
+                                        <MaterialButton title="Sync with Planning Center" icon="refresh" on:click={() => refreshPcoProject(currentProjectPcoFolderId, $activeProject)} white>
+                                            <T id="cloud.sync" />
+                                        </MaterialButton>
+
+                                        <div class="DIVIDER"></div>
+                                    {/if}
+
                                     {#if currentProject.sourcePath}
                                         <MaterialButton title="actions.save_to_file" icon="save" on:click={() => exportProject(currentProject, $activeProject || "", currentProject.sourcePath)} white>
                                             <T id="actions.save_to_file" />
@@ -521,15 +518,9 @@
                     </MaterialButton>
 
                     {#if $providerConnections.planningcenter}
-                        <MaterialButton variant="outlined" icon="list" title="Planning Center" on:click={openPcoPicker} white>
-                            Planning Center
-                        </MaterialButton>
+                        <MaterialButton variant="outlined" icon="list" title="Planning Center" on:click={openPcoPicker} white>Planning Center</MaterialButton>
                     {/if}
                 </div>
-            {/if}
-
-            {#if showPcoPicker}
-                <PcoServicePicker on:select={onPcoServiceSelected} on:close={() => (showPcoPicker = false)} />
             {/if}
 
             <FloatingInputs gradient style="width: 50px;height: 50px;border: none;">

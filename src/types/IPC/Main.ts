@@ -358,6 +358,7 @@ export interface MainReturnPayloads {
         liveStartAt: string | null
         liveEndAt: string | null
         length: number | null
+        isPreService: boolean
         serviceStartAt: string | null
         serviceEndAt: string | null
     } | null>

@@ -191,11 +191,12 @@ export interface Timer {
     endDynamic?: string
     event?: string
     time?: string
+
+    // PCO Live
     pco?: {
         serviceTypeId: string
         planId: string
-        countdownType: "full_length" | "end_on_time" | "end_service"
-        autoFollow?: boolean
+        countdownType: "end_on_time" | "full_length" | "end_service"
     }
 
     warn?: boolean

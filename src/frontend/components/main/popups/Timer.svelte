@@ -33,36 +33,13 @@
     }
 
     let chosenType = ""
-    const allTimerTypes: any = [
+    $: timerTypes = [
         { id: "counter", name: translateText("timer.from_to"), translate: true, icon: "timer" },
         { id: "clock", name: translateText("timer.to_time"), translate: true, icon: "clock" },
         { id: "event", name: translateText("timer.to_event"), translate: true, icon: "calendar" },
-        { id: "pco_live", name: "PCO Live Countdown", icon: "list" }
+        // only show when connected to Planning Center
+        ...($providerConnections.planningcenter ? [{ id: "pco_live", name: "PCO Live", icon: "list" }] : [])
     ]
-    $: timerTypes = allTimerTypes.filter((t: any) => t.id !== "pco_live" || $providerConnections.planningcenter)
-
-    // PCO Live: available plans loaded after PCO sync
-    $: pcoAvailablePlans = ($contentProviderData.planningcenter?.availablePlans || []) as { planId: string; serviceTypeId: string; name: string; date: string }[]
-    $: pcoPlanOptions = [
-        { value: "auto", label: translateText("timer.follow_active_project") },
-        ...pcoAvailablePlans.map((p) => ({ value: p.planId + "|" + p.serviceTypeId, label: `${p.name} (${new Date(p.date).toLocaleDateString()})` }))
-    ]
-
-    const pcoCountdownTypeOptions = [
-        { value: "end_on_time", label: translateText("timer.end_on_time") },
-        { value: "full_length", label: translateText("timer.full_length") },
-        { value: "end_service", label: translateText("timer.end_service") }
-    ]
-
-    function updatePcoPlan(e: any) {
-        const val = e.detail || ""
-        if (val === "auto") {
-            timer.pco = { serviceTypeId: "", planId: "", countdownType: timer.pco?.countdownType || "end_on_time", autoFollow: true }
-        } else {
-            const [planId, serviceTypeId] = val.split("|")
-            timer.pco = { serviceTypeId: serviceTypeId || "", planId: planId || "", countdownType: timer.pco?.countdownType || "end_on_time", autoFollow: false }
-        }
-    }
 
     // counter
     $: fromTime = secondsToTime(timer.start === undefined ? 300 : timer.start)
@@ -181,7 +158,7 @@
         if (timer.type === "event") newTimer.event = timer.event
         else if (timer.type === "clock") newTimer.time = timer.time || "12:00"
         else if (timer.type === "pco_live") {
-            newTimer.pco = { serviceTypeId: timer.pco?.serviceTypeId || "", planId: timer.pco?.planId || "", countdownType: timer.pco?.countdownType || "end_on_time", autoFollow: timer.pco?.autoFollow !== false }
+            newTimer.pco = { serviceTypeId: timer.pco?.serviceTypeId || "", planId: timer.pco?.planId || "", countdownType: timer.pco?.countdownType || "end_on_time" }
         } else {
             newTimer.start = timer.start === undefined ? 300 : Number(timer.start)
             newTimer.end = timer.end === undefined ? 0 : Number(timer.end)
@@ -228,6 +205,23 @@
 
     $: dynamicStart = getTimerDynamicValue(timer.startDynamic)
     $: dynamicEnd = getTimerDynamicValue(timer.endDynamic)
+
+    // PCO Live
+
+    // available plans loaded after PCO sync
+    $: pcoAvailablePlans = ($contentProviderData.planningcenter?.availablePlans || []) as { planId: string; serviceTypeId: string; name: string; date: string }[]
+    $: pcoPlanOptions = [{ value: "|", label: translateText("export.current_project") }, ...pcoAvailablePlans.map((p) => ({ value: p.planId + "|" + p.serviceTypeId, label: p.name, data: new Date(p.date).toLocaleDateString() }))]
+
+    const pcoCountdownTypeOptions = [
+        { value: "end_on_time", label: translateText("timer.end_on_time") },
+        { value: "full_length", label: translateText("timer.full_length") },
+        { value: "end_service", label: translateText("timer.end_service") }
+    ]
+
+    function updatePcoPlan(e: any) {
+        const [planId, serviceTypeId] = (e.detail || "").split("|")
+        timer.pco = { serviceTypeId: serviceTypeId || "", planId: planId || "", countdownType: timer.pco?.countdownType || "end_on_time" }
+    }
 </script>
 
 {#if (!currentTimer?.id || created) && !chosenType}
@@ -318,30 +312,6 @@
                 <input type="time" step="2" value={timer.time} on:change={updateTime} />
             </div>
         </div>
-    {:else if timer.type === "pco_live"}
-        <div class="timerbox" style="width: 100%;margin: 20px 0;overflow: visible;">
-            <p style="border: none;min-height: unset;" class="part">PCO Live Countdown</p>
-            <div style="flex-direction: column;gap: 8px;padding: 12px;">
-                {#if !pcoAvailablePlans.length}
-                    <p style="opacity: 0.6;font-size: 0.9em;">No PCO plans found. Sync with Planning Center in Settings → Connection first.</p>
-                {:else}
-                    <MaterialDropdown
-                        label="Service plan"
-                        style="width: 100%;"
-                        options={pcoPlanOptions}
-                        value={timer.pco?.autoFollow !== false ? "auto" : (timer.pco?.planId && timer.pco?.serviceTypeId) ? timer.pco.planId + "|" + timer.pco.serviceTypeId : "auto"}
-                        on:change={updatePcoPlan}
-                    />
-                {/if}
-                <MaterialDropdown
-                    label="Countdown type"
-                    style="width: 100%;margin-top: 8px;"
-                    options={pcoCountdownTypeOptions}
-                    value={timer.pco?.countdownType || "end_on_time"}
-                    on:change={(e) => (timer.pco = { serviceTypeId: timer.pco?.serviceTypeId ?? "", planId: timer.pco?.planId ?? "", countdownType: e.detail })}
-                />
-            </div>
-        </div>
     {:else if timer.type === "event"}
         <div class="timerbox" style="width: 100%;margin: 20px 0;overflow: visible;">
             <p style="border: none;min-height: unset;border-radius: 8px;" class="part">
@@ -362,6 +332,22 @@
             {:else}
                 <div style="padding: 10px;display: flex;align-items: center;opacity: 0.5;"><T id="timer.no_events" /></div>
             {/if}
+        </div>
+    {:else if timer.type === "pco_live"}
+        <div class="timerbox" style="width: 100%;margin: 20px 0;overflow: visible;">
+            <p style="border: none;min-height: unset;border-radius: 8px;" class="part">
+                {translateText("PCO Live timer.counter")}
+            </p>
+
+            <div style="flex-direction: column;">
+                <MaterialDropdown label="clock.type" style="width: 100%;" options={pcoCountdownTypeOptions} value={timer.pco?.countdownType || "end_on_time"} on:change={(e) => (timer.pco = { serviceTypeId: timer.pco?.serviceTypeId ?? "", planId: timer.pco?.planId ?? "", countdownType: e.detail })} />
+
+                {#if !pcoAvailablePlans.length}
+                    <p style="opacity: 0.6;font-size: 0.9em;">No upcoming services found!</p>
+                {:else}
+                    <MaterialDropdown label="formats.project (Service)" style="width: 100%;" options={pcoPlanOptions} value={timer.pco?.planId && timer.pco?.serviceTypeId ? timer.pco.planId + "|" + timer.pco.serviceTypeId : "|"} on:change={updatePcoPlan} />
+                {/if}
+            </div>
         </div>
     {/if}
 

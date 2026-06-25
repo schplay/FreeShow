@@ -83,7 +83,7 @@
         counter: "timer.from_to",
         clock: "timer.to_time",
         event: "timer.to_event",
-        pco_live: "timer.pco_live"
+        pco_live: "PCO Live"
     }
 
     function keydown(e: KeyboardEvent) {

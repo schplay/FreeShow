@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte"
     import type { Tree } from "../../../types/Projects"
-    import { activeProfile, activeProject, contentProviderData, folders, labelsDisabled, openedFolders, projects } from "../../stores"
+    import { activeProfile, activeProject, folders, labelsDisabled, openedFolders, projects } from "../../stores"
     import { history } from "../helpers/history"
     import Icon from "../helpers/Icon.svelte"
     import T from "../helpers/T.svelte"
@@ -11,8 +11,6 @@
     import Loader from "../main/Loader.svelte"
     import Center from "../system/Center.svelte"
     import SelectElem from "../system/SelectElem.svelte"
-    import { Main } from "../../../types/IPC/Main"
-    import { sendMain } from "../../IPC/main"
     import { openProject } from "./project"
 
     export let tree: Tree[]
@@ -104,20 +102,9 @@
 
     function open(e: any, id: string) {
         if (e.detail.target.closest(".edit") || e.detail.target.querySelector(".edit") || editActive) return
-        if (e.detail.target.closest(".pco-refresh")) return
         if (e.detail.ctrl) return
 
         openProject(id, !e.detail.alt)
-    }
-
-    function getPcoServiceTypeId(projectId: string): string {
-        const plans = $contentProviderData?.planningcenter?.availablePlans as { planId: string; serviceTypeId: string }[] | undefined
-        return plans?.find((p) => p.planId === projectId)?.serviceTypeId || ""
-    }
-
-    function refreshPco(e: Event, serviceTypeId: string, planId: string) {
-        e.stopPropagation()
-        sendMain(Main.PCO_LOAD_PLAN, { serviceTypeId, planId })
     }
 
     function toggleFolder(e: any, project: any, opened: boolean) {
@@ -188,11 +175,6 @@
                                         <MaterialButton style="width: 100%;padding: 0.08rem 0.65rem;font-weight: normal;" title="actions.id_select_project: <b>{project.name}</b>" on:click={(e) => open(e, project.id)} class="context #project_button{isReadOnly ? '_readonly' : ''}" isActive={$activeProject === project.id} tab>
                                             <Icon id={$projects[project.id]?.archived ? "archive" : "project"} white={$projects[project.id]?.archived} />
                                             <HiddenInput value={project.name} id={"project_" + project.id} on:edit={(e) => rename(project.id, e.detail.value)} bind:edit={editActive} allowEdit={!isReadOnly} />
-                                            {#if getPcoServiceTypeId(project.id) && !isReadOnly}
-                                                <button class="pco-refresh" title="Sync with Planning Center" on:click={(e) => refreshPco(e, getPcoServiceTypeId(project.id), project.id)}>
-                                                    <Icon id="refresh" size={0.75} white />
-                                                </button>
-                                            {/if}
                                         </MaterialButton>
                                     {/if}
                                 </SelectElem>
@@ -280,23 +262,5 @@
 
     .indented {
         border-inline-start: 1px solid var(--primary-lighter);
-    }
-
-    .pco-refresh {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 2px 4px;
-        display: flex;
-        align-items: center;
-        opacity: 0.35;
-        flex-shrink: 0;
-        margin-inline-start: auto;
-        transition: opacity 0.15s;
-        border-radius: 3px;
-    }
-    .pco-refresh:hover {
-        opacity: 0.9;
-        background: rgba(255, 255, 255, 0.08);
     }
 </style>

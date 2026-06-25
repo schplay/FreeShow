@@ -541,6 +541,7 @@
         "regex_manager": "Regex manager",
         "choose_camera": "Choose camera",
         "manage_tags": "Manage tags",
+        "sync_folders": "Sync folders",
         "sync_categories": "Sync categories",
         "effect_items": "Effect items",
         "timeline": "Timeline",
@@ -1210,13 +1211,9 @@
         "create": "Create",
         "line": "Line",
         "mask": "Mask",
-        "pco_live": "PCO Live",
-        "follow_active_project": "Follow active project",
-        "end_on_time": "End Item on Time",
-        "full_length": "Full Item Length",
-        "end_service": "End Service on Time",
-        "no_upcoming_services": "No upcoming services",
-        "no_upcoming_services_found": "No upcoming services found."
+        "end_on_time": "End item on time",
+        "full_length": "Full item length",
+        "end_service": "End service on time"
     },
     "clock": {
         "type": "Type",
@@ -1419,7 +1416,6 @@
         "content_provider": "Content provider",
         "connect_to": "Connect to $1",
         "disconnect_from": "Disconnect from $1",
-        "clear_pco_folder_selection": "Clear selection (sync all)",
         "sync_categories_tip": "Select which categories to upload as songs",
         "reset_all": "Reset everything",
         "reset_theme": "Reset theme",

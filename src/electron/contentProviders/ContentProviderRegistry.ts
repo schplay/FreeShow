@@ -146,11 +146,7 @@ export class ContentProviderRegistry {
      */
     static async fetchFolderTree(providerId: ContentProviderId): Promise<PCOFolderTreeNode[]> {
         this.ensureInitialized()
-        const provider = this.getProvider<PlanningCenterProvider>(providerId)
-        if (typeof (provider as any)?.fetchFolderTree === "function") {
-            return (provider as any).fetchFolderTree()
-        }
-        return []
+        return this.getProvider<PlanningCenterProvider>(providerId)?.fetchFolderTree?.() ?? []
     }
 
     /**
@@ -158,11 +154,7 @@ export class ContentProviderRegistry {
      */
     static async fetchServiceTree(providerId: ContentProviderId): Promise<PCOFolderTreeNode[]> {
         this.ensureInitialized()
-        const provider = this.getProvider<PlanningCenterProvider>(providerId)
-        if (typeof (provider as any)?.fetchServiceTree === "function") {
-            return (provider as any).fetchServiceTree()
-        }
-        return []
+        return this.getProvider<PlanningCenterProvider>(providerId)?.fetchServiceTree?.() ?? []
     }
 
     /**
@@ -170,10 +162,7 @@ export class ContentProviderRegistry {
      */
     static async loadSinglePlan(serviceTypeId: string, planId: string): Promise<void> {
         this.ensureInitialized()
-        const provider = this.getProvider<PlanningCenterProvider>("planningcenter")
-        if (typeof (provider as any)?.loadSinglePlan === "function") {
-            return (provider as any).loadSinglePlan(serviceTypeId, planId)
-        }
+        return this.getProvider<PlanningCenterProvider>("planningcenter")?.loadSinglePlan?.(serviceTypeId, planId)
     }
 
     /**
@@ -181,11 +170,7 @@ export class ContentProviderRegistry {
      */
     static async getPcoLiveData(serviceTypeId: string, planId: string): Promise<PCOLiveData | null> {
         this.ensureInitialized()
-        const provider = this.getProvider<PlanningCenterProvider>("planningcenter")
-        if (typeof (provider as any)?.getLiveData === "function") {
-            return (provider as any).getLiveData(serviceTypeId, planId)
-        }
-        return null
+        return this.getProvider<PlanningCenterProvider>("planningcenter")?.getLiveData?.(serviceTypeId, planId) ?? null
     }
 
     /**
@@ -193,11 +178,7 @@ export class ContentProviderRegistry {
      */
     static async getPcoPusherAuth(socketId: string, channelName: string, serviceTypeId: string): Promise<{ auth: string; channel_data?: string } | null> {
         this.ensureInitialized()
-        const provider = this.getProvider<PlanningCenterProvider>("planningcenter")
-        if (typeof (provider as any)?.getPusherAuth === "function") {
-            return (provider as any).getPusherAuth(socketId, channelName, serviceTypeId)
-        }
-        return null
+        return this.getProvider<PlanningCenterProvider>("planningcenter")?.getPusherAuth?.(socketId, channelName, serviceTypeId) ?? null
     }
 
     /**

@@ -18,8 +18,6 @@
     import MaterialTextInput from "../../inputs/MaterialTextInput.svelte"
     import MaterialToggleSwitch from "../../inputs/MaterialToggleSwitch.svelte"
     import Tip from "../../main/Tip.svelte"
-    import PcoFolderTree from "./PcoFolderTree.svelte"
-    import type { PCOFolderTreeNode } from "../../../../electron/contentProviders/planningCenter/request"
     import { startRemoteController, stopRemoteController } from "../../../utils/remoteController"
 
     let ip = "localhost"
@@ -155,16 +153,6 @@
         })
     }
 
-    // Planning Center folder tree
-    let folderTree: PCOFolderTreeNode[] | null = null
-    let folderTreeLoading = false
-
-    async function loadFolderTree() {
-        folderTreeLoading = true
-        folderTree = (await requestMain(Main.PROVIDER_FETCH_FOLDERS, { providerId: "planningcenter" })) ?? null
-        folderTreeLoading = false
-    }
-
     $: projectTemplateOptions = [{ value: "", label: translateText("main.none") }, ...sortByName(keysToID($projectTemplates)).map(({ id, name }) => ({ value: id, label: name }))]
 
     $: providerOriginOptions = [
@@ -292,45 +280,17 @@
             <Icon id="launch" white />
         </MaterialButton>
     </InputRow>
+
+    <InputRow>
+        <!-- <MaterialPopupButton label="popup.sync_folders" value="" name="" icon="folder" popupId="sync_folders" on:click={() => activePopup.set("sync_folders")} style="flex: 1;" /> -->
+        <MaterialButton icon="folder" on:click={() => activePopup.set("sync_folders")} style="flex: 1;">
+            <T id="popup.sync_folders" />
+        </MaterialButton>
+    </InputRow>
+
     <MaterialDropdown label="Song origin" options={providerOriginOptions} value={$contentProviderData.planningcenter?.songOrigin || ""} on:change={(e) => updateProvider("planningcenter", "songOrigin", e.detail)} />
     {#if Object.keys($projectTemplates).length}
         <MaterialDropdown label="actions.project_template" options={projectTemplateOptions} value={$contentProviderData.planningcenter?.projectTemplate || ""} on:change={(e) => updateProvider("planningcenter", "projectTemplate", e.detail)} />
-    {/if}
-
-    <Title label="Sync Folders" icon="folder" />
-    {#if !$contentProviderData.planningcenter?.selectedFolderIds?.length}
-        <Tip value="Select folders to limit which services are synced. By default all services are synced." top={0} />
-    {:else}
-        <Tip value="Only services in the selected folders will be synced." top={0} />
-    {/if}
-
-    {#if folderTreeLoading}
-        <InputRow><span style="opacity:0.6;font-size:0.9em;padding:6px 0;">Loading folder structure...</span></InputRow>
-    {:else if folderTree === null}
-        <InputRow>
-            <MaterialButton on:click={loadFolderTree} style="flex: 1;" icon="folder">
-                Load folder structure
-            </MaterialButton>
-        </InputRow>
-    {:else if folderTree.length === 0}
-        <Tip type="warning" value="No folders found in your Planning Center account." top={0} />
-    {:else}
-        <InputRow>
-            <MaterialButton
-                style="flex: 1;"
-                on:click={() => updateProvider("planningcenter", "selectedFolderIds", [])}
-                title="settings.clear_pco_folder_selection"
-            >
-                <T id="settings.clear_pco_folder_selection" />
-            </MaterialButton>
-        </InputRow>
-        <div class="folder-tree-container">
-            <PcoFolderTree
-                nodes={folderTree}
-                selectedIds={$contentProviderData.planningcenter?.selectedFolderIds || []}
-                on:change={(e) => updateProvider("planningcenter", "selectedFolderIds", e.detail)}
-            />
-        </div>
     {/if}
 {:else if $providerConnections.churchApps && !cloudOnly.churchApps}
     <!-- ChurchApps connected -->
@@ -393,15 +353,3 @@
 {#if $obsData.enabled && obsWasDisabled}
     <Tip value="edit.position: guide_title.drawer > tabs.functions > OBS Studio" top={15} />
 {/if}
-
-<style>
-    .folder-tree-container {
-        max-height: 300px;
-        overflow-y: auto;
-        border: 1px solid var(--primary-lighter);
-        border-radius: 4px;
-        padding: 4px 0;
-        margin: 4px 0;
-        background: var(--primary-darker);
-    }
-</style>
