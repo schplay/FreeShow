@@ -150,6 +150,15 @@
 
                             updateInput()
                         }}
+                        on:keydown={(e) => {
+                            if (e.key === "Enter" && i === (currentInput.options?.length || 0) - 1) {
+                                if (!currentInput.options) currentInput.options = []
+                                currentInput.options.push({ value: "" })
+
+                                currentInput.options = currentInput.options
+                                updateInput()
+                            }
+                        }}
                         autofocus={!!currentInput.question && !option?.value}
                     />
                     <MaterialButton
@@ -181,7 +190,9 @@
                 <T id="interaction.add_option" />
             </MaterialButton>
 
-            <!-- Display tip?: order will be random -->
+            {#if currentInput.options && currentInput.options.length > 1}
+                <MaterialToggleSwitch label="variables.randomize" style="margin-top: 10px;" checked={currentInput.randomize} defaultValue={false} on:change={(e) => updateValue(e.detail, "randomize")} />
+            {/if}
         </div>
     {:else if currentInput.type === "text"}
         <!-- optional - for polls we don't need answers -->

@@ -35,6 +35,7 @@ import DeleteShow from "../components/main/popups/DeleteShow.svelte"
 import DisplayDuration from "../components/main/popups/DisplayDuration.svelte"
 import DrawerSearchOptions from "../components/main/popups/DrawerSearchOptions.svelte"
 import DynamicValues from "../components/main/popups/DynamicValues.svelte"
+import EditChart from "../components/main/popups/EditChart.svelte"
 import EditEvent from "../components/main/popups/EditEvent.svelte"
 import EffectItems from "../components/main/popups/EffectItems.svelte"
 import Emitters from "../components/main/popups/Emitters.svelte"
@@ -128,6 +129,7 @@ export const popups: { [key in Popups]: ComponentType } = {
     import_scripture: ImportScripture,
     create_collection: CreateCollection,
     edit_event: EditEvent,
+    edit_chart: EditChart,
     choose_screen: ChooseScreen,
     choose_output: ChooseOutput,
     choose_style: ChooseStyle,
