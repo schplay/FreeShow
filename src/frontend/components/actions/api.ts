@@ -352,8 +352,8 @@ export const API_ACTIONS = {
     toggle_log_song_usage: (data: API_toggle_specific) => toggleLogSongUsage(data),
 
     // ACTION
-    name_run_action: (data: API_strval) => runActionByName(data.value), // BC
-    run_action: (data: API_id) => runActionId(data.id), // BC
+    name_run_action: (data: API_strval) => runActionByName(data.value, "api"), // BC
+    run_action: (data: API_id) => runActionId(data.id, "api"), // BC
     toggle_action: (data: API_toggle) => toggleAction(data),
 
     // ADD
@@ -428,7 +428,3 @@ export async function triggerAction(data: API) {
 
     sendMain(Main.API_TRIGGER, { ...data, returnId, data: returnData })
 }
-
-// export function sendDataAPI(data: any) {
-//     send("API_DATA", data)
-// }

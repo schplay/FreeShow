@@ -9,27 +9,6 @@ import { captionLanguages } from "./captionLanguages"
 dayjs.extend(localizedFormat)
 dayjs.extend(extendedFormat)
 
-export type EditInput = {
-    name?: string
-    id?: string
-    icon?: string
-    key?: string
-    input: string
-    value?: string | number | boolean | any[]
-    extension?: string
-    hidden?: boolean
-    disabled?: string | boolean
-    valueIndex?: number
-    values?: any
-    popup?: string
-    slider?: boolean // include number slider
-    sliderValues?: any // custom number slider values
-    styleValue?: string // custom css styling
-    title?: string // custom hover title
-    relative?: boolean // updated values should be relative to each selected item (only for number px values)
-    placeholder?: string
-}
-
 export function setBoxInputValue(box: BoxContent2 | { [key: string]: EditBoxSection }, sectionId: string, inputId: string, key: keyof EditInput | string, value: any) {
     const newBox = (box?.sections ? box.sections : box) as { [key: string]: EditBoxSection }
 
@@ -63,14 +42,14 @@ export type BoxContent2 = {
 }
 export type EditBoxSection = {
     // openApplyValue?: boolean // show apply value button
-    inputs: EditInput2[][]
+    inputs: EditInput[][]
     name?: string
     noReset?: boolean
     alwaysOpen?: boolean
     defaultValues?: any[]
     expandAutoValue?: { [key: string]: any }
 }
-export type EditInput2 = {
+export type EditInput = {
     id: string
     key?: string
     valueIndex?: number // css key subvalue (e.g. box-shadow)
@@ -128,8 +107,6 @@ const alignY = [
 
 export const textSections: { [key: string]: EditBoxSection } = {
     default: {
-        // WIP icon color..?
-
         inputs: [
             [
                 { id: "style", key: "font-family", type: "fontDropdown", value: "CMGSans", styleValue: "", values: { label: "edit.family", style: "flex: 4;max-width: 80%;" } },
@@ -154,9 +131,9 @@ export const textSections: { [key: string]: EditBoxSection } = {
                 }
             ],
             [
-                { id: "style", key: "font-weight", type: "toggle", value: "bold", values: { label: "edit._title_bold", icon: "bold" } },
-                { id: "style", key: "font-style", type: "toggle", value: "italic", values: { label: "edit._title_italic", icon: "italic" } },
-                { id: "style", key: "text-decoration", type: "toggle", value: "underline", values: { label: "edit._title_underline", icon: "underline" } },
+                { id: "style", key: "font-weight", type: "toggle", value: "bold", values: { label: "edit._title_bold [Ctrl+B]", icon: "bold" } },
+                { id: "style", key: "font-style", type: "toggle", value: "italic", values: { label: "edit._title_italic [Ctrl+I]", icon: "italic" } },
+                { id: "style", key: "text-decoration", type: "toggle", value: "underline", values: { label: "edit._title_underline [Ctrl+U]", icon: "underline" } },
                 { id: "style", key: "text-decoration", type: "toggle", value: "line-through", values: { label: "edit._title_strikethrough", icon: "strikethrough" } }
             ]
         ]
@@ -350,7 +327,7 @@ const mediaSections: { [key: string]: EditBoxSection } = {
 
 ///
 
-export function splitIntoRows(inputs: EditInput2[]) {
+export function splitIntoRows(inputs: EditInput[]) {
     return inputs.map((a) => [a])
 }
 
@@ -608,6 +585,22 @@ export const itemBoxes: Box2 = {
         sections: {
             default: {
                 inputs: [
+                    [
+                        {
+                            id: "visualizer.type",
+                            type: "dropdown",
+                            value: "bars",
+                            values: {
+                                label: "sort.type",
+                                defaultValue: "bars",
+                                options: [
+                                    { value: "bars", label: "Lines" },
+                                    { value: "particles", label: "Particles" },
+                                    { value: "kaleidoscope", label: "Kaleidoscope" }
+                                ]
+                            }
+                        }
+                    ],
                     [
                         { id: "visualizer.padding", type: "number", value: 0, values: { label: "edit.padding", style: "flex: 4;" } },
                         { id: "visualizer.color", type: "color", value: "", values: { label: "edit.color", allowEmpty: true, allowOpacity: true, noLabel: true, style: "flex: 1;" } }
